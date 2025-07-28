@@ -43,7 +43,7 @@
 
 <script>
     // --- VERSION ---
-    console.log("RapidShade: Widget version 0.3");
+    console.log("RapidShade: Widget version 0.4");
 
     // --- CONFIGURATION ---
     // Ensure these match exactly your Grist tables/columns:
@@ -88,14 +88,20 @@
         }
     }
 
+    // Fetch fresh Periods table data on demand
+    async function getPeriodsData() {
+        console.log("RapidShade: Fetching periods table via API");
+        const tableData = await grist.docApi.fetchTable(config.tables.PERIODS);
+        console.log("RapidShade: Raw periods data:", tableData);
+        return Array.isArray(tableData) ? tableData : (tableData.records || []);
+    }
+
     // Prompt user to pick a target Period record
-    async function promptForPeriod(periodsData) {
-        // periodsData may be a TableData object; extract .records if so
-        if (!periodsData) {
+    async function promptForPeriod(periods) {
+        if (!Array.isArray(periods) || periods.length === 0) {
             console.log("RapidShade: No periods data available to prompt for period");
             return null;
         }
-        const periods = Array.isArray(periodsData) ? periodsData : (periodsData.records || []);
         const select = document.getElementById('period-select');
         select.innerHTML = '';
         periods.forEach(p => {
@@ -126,7 +132,8 @@
         console.log(`RapidShade: Starting duplication for event ${sourceEvent.id}`);
         try {
             setUIState('processing', 'Fetching period data...');
-            const targetPeriodId = await promptForPeriod(allTables.Periods);
+            const periods = await getPeriodsData();
+            const targetPeriodId = await promptForPeriod(periods);
             if (!targetPeriodId) {
                 setUIState('info', 'Duplication cancelled.');
                 return;
@@ -183,7 +190,7 @@
             setUIState('processing', 'Duplicating expenses...');
             console.log(`RapidShade: Copying expenses and details for event ${sourceEvent.id}`);
             for (const exp of allTables.Expenses.filter(e=>e.fields.Event===sourceEvent.id)) {
-                const [newExpId] = await grist.docApi.addRecords(config.tables.EXPENSES,[{
+                const [newExpId] = await grist.docApi.addRecords(config.tables.EXPENSES,[{ 
                     Event: newEventId,
                     Category: exp.fields.Category,
                     Budget: exp.fields.Budget,
@@ -213,7 +220,7 @@
             setUIState('processing', 'Duplicating revenues...');
             console.log(`RapidShade: Copying revenues and details for event ${sourceEvent.id}`);
             for (const rev of allTables.Revenues.filter(r=>r.fields.Event===sourceEvent.id)) {
-                const [newRevId] = await grist.docApi.addRecords(config.tables.REVENUES,[{
+                const [newRevId] = await grist.docApi.addRecords(config.tables.REVENUES,[{ 
                     Event: newEventId,
                     Category: rev.fields.Category,
                     Budget: rev.fields.Budget,
@@ -255,28 +262,26 @@
         tables: Object.values(config.tables)
     });
 
-    // Load all tables and extract .records arrays before wiring onRecord
+    // Load static tables into memory on startup
     Promise.all([
         grist.docApi.fetchTable(config.tables.EVENTS),
-        grist.docApi.fetchTable(config.tables.PERIODS),
         grist.docApi.fetchTable(config.tables.PROJECTED_BUDGETS),
         grist.docApi.fetchTable(config.tables.EXPENSES),
         grist.docApi.fetchTable(config.tables.EXPENSE_DETAILS),
         grist.docApi.fetchTable(config.tables.REVENUES),
         grist.docApi.fetchTable(config.tables.REVENUE_DETAILS),
         grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS),
-    ]).then(([evts,pers,pbs,exps,exd,revs,rvd,pbvs])=>{
+    ]).then(([evts,pbs,exps,exd,revs,rvd,pbvs])=>{
         allTables = {
-            Events:   evts.records,
-            Periods:  pers.records,
-            ProjectedBudgets: pbs.records,
-            Expenses: exps.records,
-            ExpenseDetails: exd.records,
-            Revenues: revs.records,
-            RevenueDetails: rvd.records,
-            PeriodBudgetVersions: pbvs.records,
+            Events:   Array.isArray(evts) ? evts : evts.records || [],
+            ProjectedBudgets: Array.isArray(pbs) ? pbs : pbs.records || [],
+            Expenses: Array.isArray(exps) ? exps : exps.records || [],
+            ExpenseDetails: Array.isArray(exd) ? exd : exd.records || [],
+            Revenues: Array.isArray(revs) ? revs : revs.records || [],
+            RevenueDetails: Array.isArray(rvd) ? rvd : rvd.records || [],
+            PeriodBudgetVersions: Array.isArray(pbvs) ? pbvs : pbvs.records || [],
         };
-        console.log("RapidShade: Loaded all tables into memory");
+        console.log("RapidShade: Loaded static tables into memory");
         grist.onRecord(duplicateEvent);
     }).catch(err=>{
         console.error(`RapidShade: Failed to load initial data:`, err);
