@@ -5,64 +5,21 @@
     <title>Duplicate Event Widget</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <style>
-        body {
-            font-family: sans-serif;
-            padding: 1rem;
-            text-align: center;
-            color: #333;
-            background-color: #f9f9f9;
-        }
-        #widget-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-        }
-        .hidden {
-            display: none !important;
-        }
-        #loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 1rem;
-        }
-        #period-selector-container {
-            padding: 1rem;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            background-color: white;
-        }
-        select, button {
-            padding: 8px 12px;
-            margin-top: 10px;
-            border-radius: 4px;
-            border: 1px solid #ccc;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            cursor: pointer;
-        }
-        #status {
-            margin-top: 1rem;
-            font-weight: bold;
-        }
+        body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
+        #widget-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+        .hidden { display: none !important; }
+        #loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
+        #period-selector-container { padding: 1rem; border: 1px solid #ccc; border-radius: 8px; background-color: white; }
+        select, button { padding: 8px 12px; margin-top: 10px; border-radius: 4px; border: 1px solid #ccc; }
+        button { background-color: #4CAF50; color: white; cursor: pointer; }
+        #status { margin-top: 1rem; font-weight: bold; }
         .status-success { color: green; }
         .status-error { color: red; }
         .status-info { color: #555; }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-
 <div id="widget-container">
     <div id="initial-state">
         <h2>Duplicate Event Widget</h2>
@@ -86,7 +43,6 @@
 
 <script>
     // --- CONFIGURATION ---
-    // Make sure these names exactly match your Grist document's tables and columns.
     const config = {
         tables: {
             EVENTS: "Events",
@@ -96,15 +52,14 @@
             EXPENSE_DETAILS: "ExpenseDetails",
             REVENUES: "Revenues",
             REVENUE_DETAILS: "RevenueDetails",
+            PERIOD_BUDGET_VERSIONS: "PeriodBudgetVersions",
         },
         triggerColumn: "Duplicate_Trigger",
     };
 
-    // --- SCRIPT LOGIC ---
     let allTables = {};
     let resolvePeriodSelection = null;
 
-    // Helper to update the UI state
     function setUIState(state, message = '') {
         document.getElementById('initial-state').classList.add('hidden');
         document.getElementById('processing-state').classList.add('hidden');
@@ -118,17 +73,17 @@
             document.getElementById('processing-message').textContent = message;
         } else if (state === 'selecting') {
             document.getElementById('period-selector-container').classList.remove('hidden');
-        } else if (state === 'success' || state === 'error' || state === 'info') {
-             const statusEl = document.getElementById('status');
-             statusEl.textContent = message;
-             statusEl.className = `status-${state}`;
-             document.getElementById('initial-state').classList.remove('hidden'); // Show ready message again
+        } else if (['success','error','info'].includes(state)) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status-${state}`;
+            document.getElementById('initial-state').classList.remove('hidden');
         }
     }
 
     async function promptForPeriod(periods) {
         const select = document.getElementById('period-select');
-        select.innerHTML = ''; // Clear previous options
+        select.innerHTML = '';
         periods.forEach(p => {
             const option = document.createElement('option');
             option.value = p.id;
@@ -136,40 +91,29 @@
             select.appendChild(option);
         });
         setUIState('selecting');
-        return new Promise(resolve => {
-            resolvePeriodSelection = resolve;
-        });
+        return new Promise(resolve => { resolvePeriodSelection = resolve; });
     }
 
     document.getElementById('confirm-duplication').addEventListener('click', () => {
-        const selectedPeriodId = document.getElementById('period-select').value;
-        if (resolvePeriodSelection) {
-            resolvePeriodSelection(parseInt(selectedPeriodId, 10));
-        }
+        const selected = parseInt(document.getElementById('period-select').value, 10);
+        resolvePeriodSelection(selected);
     });
-
     document.getElementById('cancel-duplication').addEventListener('click', () => {
-        if (resolvePeriodSelection) {
-            resolvePeriodSelection(null); // Resolve with null on cancel
-        }
+        resolvePeriodSelection(null);
         setUIState('initial');
     });
 
     async function duplicateEvent(sourceEvent) {
-        if (!sourceEvent) { return; } // Ignore clicks on the "Add New" row
-        
+        if (!sourceEvent) { return; }
         try {
             setUIState('processing', 'Fetching period data...');
             const targetPeriodId = await promptForPeriod(allTables.Periods);
-
             if (!targetPeriodId) {
-                setUIState('info', 'Duplication cancelled by user.');
+                setUIState('info', 'Duplication cancelled.');
                 return;
             }
 
             setUIState('processing', 'Creating new event...');
-            
-            // 1. Create the new Event
             const newEventIds = await grist.docApi.addRecords(config.tables.EVENTS, [{
                 Name: `${sourceEvent.Name} (Copy)`,
                 Sport: sourceEvent.Sport,
@@ -177,88 +121,111 @@
                 LocationScope: sourceEvent.LocationScope,
                 EventStatus: 1,
                 EventType: sourceEvent.EventType,
-                DateStart: null, DateEnd: null, Notes: null,
+                DateStart: null,
+                DateEnd: null,
+                Notes: null,
             }]);
             const newEventId = newEventIds[0];
 
-            // 2. Duplicate Projected Budgets
-            setUIState('processing', 'Duplicating projected budgets...');
-            const sourceProjected = allTables.ProjectedBudgets.filter(pb => pb.fields.Event === sourceEvent.id);
-            if (sourceProjected.length > 0) {
-                await grist.docApi.addRecords(config.tables.PROJECTED_BUDGETS, sourceProjected.map(pb => ({
-                    Event: newEventId,
-                    Sport: pb.fields.Sport,
-                    ProjectedExpenses: pb.fields.ProjectedExpenses,
-                    ProjectedRevenues: pb.fields.ProjectedRevenues,
-                })));
+            // 1. Duplicate PeriodBudgetVersions (only one record)
+            setUIState('processing', 'Duplicating budget version...');
+            const pbvs = allTables.PeriodBudgetVersions.filter(pb => pb.fields.Event === sourceEvent.id);
+            let sourcePBV = pbvs.find(pb => pb.fields.IsActive)
+                || pbvs.sort((a, b) => new Date(b.fields.Created) - new Date(a.fields.Created))[0];
+            if (sourcePBV) {
+                const recordData = {};
+                Object.entries(sourcePBV.fields).forEach(([col, val]) => {
+                    if (col === 'id' || col === 'Event') { return; }
+                    recordData[col] = val;
+                });
+                recordData.Event = newEventId;
+                await grist.docApi.addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [recordData]);
             }
 
-            // 3. Duplicate Expenses and their Details
+            // 2. Duplicate ProjectedBudgets
+            setUIState('processing', 'Duplicating projected budgets...');
+            const sourceBuds = allTables.ProjectedBudgets.filter(pb => pb.fields.Event === sourceEvent.id);
+            if (sourceBuds.length) {
+                await grist.docApi.addRecords(config.tables.PROJECTED_BUDGETS,
+                    sourceBuds.map(pb => ({
+                        Event: newEventId,
+                        Sport: pb.fields.Sport,
+                        ProjectedExpenses: pb.fields.ProjectedExpenses,
+                        ProjectedRevenues: pb.fields.ProjectedRevenues,
+                    }))
+                );
+            }
+
+            // 3. Duplicate Expenses and Details
             setUIState('processing', 'Duplicating expenses...');
-            const sourceExpenses = allTables.Expenses.filter(e => e.fields.Event === sourceEvent.id);
-            for (const exp of sourceExpenses) {
-                const newExpenseIds = await grist.docApi.addRecords(config.tables.EXPENSES, [{
+            for (const exp of allTables.Expenses.filter(e => e.fields.Event === sourceEvent.id)) {
+                const [newExpId] = await grist.docApi.addRecords(config.tables.EXPENSES, [{
                     Event: newEventId,
                     Category: exp.fields.Category,
                     Budget: exp.fields.Budget,
-                    Actual: 0, Notes: null,
+                    Projected: exp.fields.Projected,
+                    Actual: 0,
+                    Notes: null,
                 }]);
-                const newExpenseId = newExpenseIds[0];
-
-                const sourceExpenseDetails = allTables.ExpenseDetails.filter(d => d.fields.Expense === exp.id);
-                if (sourceExpenseDetails.length > 0) {
-                    await grist.docApi.addRecords(config.tables.EXPENSE_DETAILS, sourceExpenseDetails.map(d => ({
-                        Expense: newExpenseId,
-                        Event: newEventId,
-                        Supplier: d.fields.Supplier,
-                        Description: d.fields.Description,
-                        Budget: d.fields.Budget,
-                        Actual: 0, Notes: null,
-                    })));
+                const details = allTables.ExpenseDetails.filter(d => d.fields.Expense === exp.id);
+                if (details.length) {
+                    await grist.docApi.addRecords(config.tables.EXPENSE_DETAILS,
+                        details.map(d => ({
+                            Expense: newExpId,
+                            Event: newEventId,
+                            Supplier: d.fields.Supplier,
+                            Description: d.fields.Description,
+                            Budget: d.fields.Budget,
+                            Actual: 0,
+                            Notes: null,
+                        }))
+                    );
                 }
             }
 
-            // 4. Duplicate Revenues and their Details
+            // 4. Duplicate Revenues and Details
             setUIState('processing', 'Duplicating revenues...');
-            const sourceRevenues = allTables.Revenues.filter(r => r.fields.Event === sourceEvent.id);
-            for (const rev of sourceRevenues) {
-                const newRevenueIds = await grist.docApi.addRecords(config.tables.REVENUES, [{
+            for (const rev of allTables.Revenues.filter(r => r.fields.Event === sourceEvent.id)) {
+                const [newRevId] = await grist.docApi.addRecords(config.tables.REVENUES, [{
                     Event: newEventId,
                     Category: rev.fields.Category,
                     Budget: rev.fields.Budget,
-                    Actual: 0, Notes: null,
+                    Projected: rev.fields.Projected,
+                    Actual: 0,
+                    Notes: null,
                 }]);
-                const newRevenueId = newRevenueIds[0];
-
-                const sourceRevenueDetails = allTables.RevenueDetails.filter(d => d.fields.Revenue === rev.id);
-                if (sourceRevenueDetails.length > 0) {
-                    await grist.docApi.addRecords(config.tables.REVENUE_DETAILS, sourceRevenueDetails.map(d => ({
-                        Revenue: newRevenueId,
-                        Event: newEventId,
-                        Supplier: d.fields.Supplier,
-                        Description: d.fields.Description,
-                        Budget: d.fields.Budget,
-                        Actual: 0, Notes: null,
-                    })));
+                const revDetails = allTables.RevenueDetails.filter(d => d.fields.Revenue === rev.id);
+                if (revDetails.length) {
+                    await grist.docApi.addRecords(config.tables.REVENUE_DETAILS,
+                        revDetails.map(d => ({
+                            Revenue: newRevId,
+                            Event: newEventId,
+                            Supplier: d.fields.Supplier,
+                            Description: d.fields.Description,
+                            Budget: d.fields.Budget,
+                            Actual: 0,
+                            Notes: null,
+                        }))
+                    );
                 }
             }
 
             setUIState('success', `Event '${sourceEvent.Name}' duplicated successfully!`);
-
-        } catch (err) {
+        }
+        catch (err) {
             console.error(err);
-            setUIState('error', `An error occurred: ${err.message}`);
+            setUIState('error', `Error during duplication: ${err.message}`);
         }
     }
-    
-    // Initialize the widget and set up the event listener
+
+    // Initialize widget
     grist.ready({
         requiredAccess: 'full',
         columns: [config.triggerColumn],
         tables: Object.values(config.tables)
     });
 
-    // Fetch all table data once when the widget loads.
+    // Load all tables on startup
     Promise.all([
         grist.docApi.fetchTable(config.tables.EVENTS),
         grist.docApi.fetchTable(config.tables.PERIODS),
@@ -267,23 +234,23 @@
         grist.docApi.fetchTable(config.tables.EXPENSE_DETAILS),
         grist.docApi.fetchTable(config.tables.REVENUES),
         grist.docApi.fetchTable(config.tables.REVENUE_DETAILS),
-    ]).then(tables => {
+        grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS),
+    ]).then(([evts, pers, pbs, exps, exd, revs, rvd, pbvs]) => {
         allTables = {
-            Events: tables[0],
-            Periods: tables[1],
-            ProjectedBudgets: tables[2],
-            Expenses: tables[3],
-            ExpenseDetails: tables[4],
-            Revenues: tables[5],
-            RevenueDetails: tables[6],
+            Events: evts,
+            Periods: pers,
+            ProjectedBudgets: pbs,
+            Expenses: exps,
+            ExpenseDetails: exd,
+            Revenues: revs,
+            RevenueDetails: rvd,
+            PeriodBudgetVersions: pbvs,
         };
-        // Listen for record actions (clicks on the trigger button)
         grist.onRecord(duplicateEvent);
     }).catch(err => {
         console.error(err);
-        setUIState('error', 'Failed to load initial data from tables. Check table names and permissions.');
+        setUIState('error', 'Failed to load initial data. Check table/column names.');
     });
-
 </script>
 </body>
 </html>
