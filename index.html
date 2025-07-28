@@ -162,13 +162,19 @@
      * @param {Array<object>} dataArr - array of field:value maps
      * @returns {Promise<Array<number>>} array of new record IDs
      */
+        /**
+     * addRecords
+     * Uses applyUserActions to batch-add records
+     * @param {string} table - table name
+     * @param {Array<object>} dataArr - array of field:value maps
+     * @returns {Promise<Array<number>>} array of new record IDs
+     */
     async function addRecords(table, dataArr) {
-        // Get the table operations interface
-        const ops = grist.docApi.getTableOperations(table);
-        // createRecords expects an object with a `records` property
-        const result = await ops.createRecords({ records: dataArr });
-        // result is an array of newly created record IDs
-        return result;
+        // Prepare AddRecord actions for each data row
+        const actions = dataArr.map(data => ["AddRecord", table, data]);
+        // applyUserActions accepts an array of actions
+        const newIds = await grist.docApi.applyUserActions(actions);
+        return newIds;
     }
 
     /**
