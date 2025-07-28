@@ -118,7 +118,7 @@
      */
 
     // Log version for debugging
-    console.log("RapidShade: Widget version 0.8");
+    console.log("RapidShade: Widget version 0.9");
 
     // --- CONFIGURATION ---
     // Must match your Grist doc's table names and the trigger column
@@ -169,10 +169,21 @@
      * @param {Array<object>} dataArr - array of field:value maps
      * @returns {Promise<Array<number>>} array of new record IDs
      */
+        /**
+     * addRecords
+     * Uses applyUserActions with correct column_values wrapper for AddRecord action
+     * @param {string} table - table name
+     * @param {Array<object>} dataArr - array of field:value maps
+     * @returns {Promise<Array<number>>} array of new record IDs
+     */
     async function addRecords(table, dataArr) {
-        // Prepare AddRecord actions for each data row
-        const actions = dataArr.map(data => ["AddRecord", table, data]);
-        // applyUserActions accepts an array of actions
+        // Build actions: AddRecord expects {column_values: {...}}
+        const actions = dataArr.map(data => [
+            "AddRecord",
+            table,
+            { column_values: data }
+        ]);
+        // Apply in one batch, returns array of new IDs
         const newIds = await grist.docApi.applyUserActions(actions);
         return newIds;
     }
