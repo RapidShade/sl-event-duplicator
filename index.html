@@ -118,7 +118,7 @@
      */
 
     // Log version for debugging
-    console.log("RapidShade: Widget version 0.9");
+    console.log("RapidShade: Widget version 1.0");
 
     // --- CONFIGURATION ---
     // Must match your Grist doc's table names and the trigger column
@@ -184,7 +184,7 @@
             { column_values: data }
         ]);
         // Apply in one batch, returns array of new IDs
-        const newIds = await grist.docApi.applyUserActions(actions);
+        const newIds = await grist.docApi.applyUserActions(0, actions);
         return newIds;
     }
 
