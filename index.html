@@ -95,10 +95,10 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.0 (Definitive)
-   * Corrects the API call to grist.docApi.addRecords()
+   * Version: 2.1 (Fixed API calls)
+   * Uses correct grist.docApi.applyUserActions() instead of addRecords()
    */
-  console.log("RapidShade: Widget version 2.0 (Definitive)");
+  console.log("RapidShade: Widget version 2.1 (Fixed API calls)");
 
   // --- Configuration: match Grist table names and trigger column ---
   const config = {
@@ -187,6 +187,29 @@
   });
 
   /**
+   * Helper function to add records using applyUserActions
+   */
+  async function addRecords(tableName, records) {
+    if (!records || records.length === 0) return [];
+    
+    // Convert records to the format expected by AddRecord action
+    const actions = records.map(record => [
+      'AddRecord',
+      tableName,
+      null, // let Grist assign the ID
+      record
+    ]);
+    
+    // Apply all actions and get the results
+    const results = await grist.docApi.applyUserActions(actions);
+    
+    // Extract the new record IDs from the results
+    // The result format is typically an array of action results
+    const newIds = results.map(result => result.id || result);
+    return newIds;
+  }
+
+  /**
    * Main duplication workflow
    */
   async function duplicateEvent(sourceEvent) {
@@ -198,7 +221,7 @@
       if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
 
       setUIState('processing', 'Creating new Event...');
-      const [newEventId] = await grist.docApi.addRecords(config.tables.EVENTS, [{
+      const newEventIds = await addRecords(config.tables.EVENTS, [{
         Name:           `${sourceEvent.Name} (Copy)`,
         Sport:          sourceEvent.Sport,
         Period:         targetPeriodId,
@@ -209,6 +232,7 @@
         DateEnd:        null,
         Notes:          null,
       }]);
+      const newEventId = newEventIds[0];
 
       setUIState('processing', 'Cloning budget version...');
       const versions = allTables.PeriodBudgetVersions.filter(v => v.fields.Event === sourceEvent.id);
@@ -216,7 +240,7 @@
       if (activeVersion) {
           const newVersionData = {...activeVersion.fields, Event: newEventId};
           delete newVersionData.id;
-          await grist.docApi.addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
+          await addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
       
       setUIState('processing', 'Cloning projected budgets...');
@@ -227,32 +251,56 @@
           ProjectedExpenses: pb.fields.ProjectedExpenses,
           ProjectedRevenues: pb.fields.ProjectedRevenues
         }));
-      if (projectedBudgets.length) await grist.docApi.addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
+      if (projectedBudgets.length) await addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
       setUIState('processing', 'Cloning expenses...');
       for (const exp of allTables.Expenses.filter(e => e.fields.Event === sourceEvent.id)) {
-        const [newExpenseId] = await grist.docApi.addRecords(config.tables.EXPENSES, [{
-          Event: newEventId, Category: exp.fields.Category, Budget: exp.fields.Budget, Projected: exp.fields.Projected, Actual: 0, Notes: null
+        const newExpenseIds = await addRecords(config.tables.EXPENSES, [{
+          Event: newEventId, 
+          Category: exp.fields.Category, 
+          Budget: exp.fields.Budget, 
+          Projected: exp.fields.Projected, 
+          Actual: 0, 
+          Notes: null
         }]);
+        const newExpenseId = newExpenseIds[0];
         
         const expenseDetails = allTables.ExpenseDetails.filter(d => d.fields.Expense === exp.id)
           .map(d => ({
-            Expense: newExpenseId, Event: newEventId, Supplier: d.fields.Supplier, Description: d.fields.Description, Budget: d.fields.Budget, Actual: 0, Notes: null
+            Expense: newExpenseId, 
+            Event: newEventId, 
+            Supplier: d.fields.Supplier, 
+            Description: d.fields.Description, 
+            Budget: d.fields.Budget, 
+            Actual: 0, 
+            Notes: null
           }));
-        if (expenseDetails.length) await grist.docApi.addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
+        if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
 
       setUIState('processing', 'Cloning revenues...');
       for (const rev of allTables.Revenues.filter(r => r.fields.Event === sourceEvent.id)) {
-        const [newRevenueId] = await grist.docApi.addRecords(config.tables.REVENUES, [{
-          Event: newEventId, Category: rev.fields.Category, Budget: rev.fields.Budget, Projected: rev.fields.Projected, Actual: 0, Notes: null
+        const newRevenueIds = await addRecords(config.tables.REVENUES, [{
+          Event: newEventId, 
+          Category: rev.fields.Category, 
+          Budget: rev.fields.Budget, 
+          Projected: rev.fields.Projected, 
+          Actual: 0, 
+          Notes: null
         }]);
+        const newRevenueId = newRevenueIds[0];
         
         const revenueDetails = allTables.RevenueDetails.filter(d => d.fields.Revenue === rev.id)
           .map(d => ({
-            Revenue: newRevenueId, Event: newEventId, Supplier: d.fields.Supplier, Description: d.fields.Description, Budget: d.fields.Budget, Actual: 0, Notes: null
+            Revenue: newRevenueId, 
+            Event: newEventId, 
+            Supplier: d.fields.Supplier, 
+            Description: d.fields.Description, 
+            Budget: d.fields.Budget, 
+            Actual: 0, 
+            Notes: null
           }));
-        if (revenueDetails.length) await grist.docApi.addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
+        if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
 
       setUIState('success', `Event '${sourceEvent.Name}' duplicated successfully!`);
