@@ -203,10 +203,19 @@
     // Apply all actions and get the results
     const results = await grist.docApi.applyUserActions(actions);
     
-    // Extract the new record IDs from the results
-    // The result format is typically an array of action results
-    const newIds = results.map(result => result.id || result);
-    return newIds;
+    // The result from applyUserActions is an object with retValues array
+    // Each AddRecord action returns the new record ID
+    if (results && results.retValues && Array.isArray(results.retValues)) {
+      return results.retValues;
+    }
+    
+    // Fallback: if results is directly an array
+    if (Array.isArray(results)) {
+      return results;
+    }
+    
+    // If single result, wrap in array
+    return [results];
   }
 
   /**
@@ -214,6 +223,9 @@
    */
   async function duplicateEvent(sourceEvent) {
     if (!sourceEvent) return;
+    
+    console.log("RapidShade: Source event data:", sourceEvent);
+    
     try {
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
@@ -221,21 +233,33 @@
       if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
 
       setUIState('processing', 'Creating new Event...');
+      
+      // Ensure we access the fields properly - sourceEvent might be normalized or raw
+      const eventName = sourceEvent.fields ? sourceEvent.fields.Name : sourceEvent.Name;
+      const eventSport = sourceEvent.fields ? sourceEvent.fields.Sport : sourceEvent.Sport;
+      const eventLocationScope = sourceEvent.fields ? sourceEvent.fields.LocationScope : sourceEvent.LocationScope;
+      const eventType = sourceEvent.fields ? sourceEvent.fields.EventType : sourceEvent.EventType;
+      const sourceEventId = sourceEvent.id;
+      
+      console.log("RapidShade: Extracted values:", {eventName, eventSport, eventLocationScope, eventType, sourceEventId});
+      
       const newEventIds = await addRecords(config.tables.EVENTS, [{
-        Name:           `${sourceEvent.Name} (Copy)`,
-        Sport:          sourceEvent.Sport,
+        Name:           `${eventName || 'Unknown'} (Copy)`,
+        Sport:          eventSport,
         Period:         targetPeriodId,
-        LocationScope:  sourceEvent.LocationScope,
+        LocationScope:  eventLocationScope,
         EventStatus:    1,
-        EventType:      sourceEvent.EventType,
+        EventType:      eventType,
         DateStart:      null,
         DateEnd:        null,
         Notes:          null,
       }]);
       const newEventId = newEventIds[0];
+      
+      console.log("RapidShade: New event created with ID:", newEventId);
 
       setUIState('processing', 'Cloning budget version...');
-      const versions = allTables.PeriodBudgetVersions.filter(v => v.fields.Event === sourceEvent.id);
+      const versions = allTables.PeriodBudgetVersions.filter(v => v.fields.Event === sourceEventId);
       const activeVersion = versions.find(v => v.fields.IsActive) || versions.sort((a, b) => new Date(b.fields.Date) - new Date(a.fields.Date))[0];
       if (activeVersion) {
           const newVersionData = {...activeVersion.fields, Event: newEventId};
@@ -244,7 +268,7 @@
       }
       
       setUIState('processing', 'Cloning projected budgets...');
-      const projectedBudgets = allTables.ProjectedBudgets.filter(pb => pb.fields.Event === sourceEvent.id)
+      const projectedBudgets = allTables.ProjectedBudgets.filter(pb => pb.fields.Event === sourceEventId)
         .map(pb => ({
           Event: newEventId,
           Sport: pb.fields.Sport,
@@ -254,7 +278,7 @@
       if (projectedBudgets.length) await addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
       setUIState('processing', 'Cloning expenses...');
-      for (const exp of allTables.Expenses.filter(e => e.fields.Event === sourceEvent.id)) {
+      for (const exp of allTables.Expenses.filter(e => e.fields.Event === sourceEventId)) {
         const newExpenseIds = await addRecords(config.tables.EXPENSES, [{
           Event: newEventId, 
           Category: exp.fields.Category, 
@@ -279,7 +303,7 @@
       }
 
       setUIState('processing', 'Cloning revenues...');
-      for (const rev of allTables.Revenues.filter(r => r.fields.Event === sourceEvent.id)) {
+      for (const rev of allTables.Revenues.filter(r => r.fields.Event === sourceEventId)) {
         const newRevenueIds = await addRecords(config.tables.REVENUES, [{
           Event: newEventId, 
           Category: rev.fields.Category, 
@@ -303,7 +327,7 @@
         if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
 
-      setUIState('success', `Event '${sourceEvent.Name}' duplicated successfully!`);
+      setUIState('success', `Event '${eventName || 'Unknown'}' duplicated successfully!`);
     } catch (err) {
       console.error('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message}`);
