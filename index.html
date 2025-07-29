@@ -92,19 +92,6 @@
   <div id="status"></div>
 </div>
 
-You've found the final piece of the puzzle\! My apologies, that error is due to a mistake in my previous code. You are absolutely right; the function is not in the `docApi` object.
-
-The correct function call is **`grist.addRecords()`**, not `grist.docApi.addRecords()`. The Grist API places direct data manipulation functions on the main `grist` object.
-
-I have corrected this in all the necessary places in the script below.
-
------
-
-### \#\# Corrected JavaScript Code
-
-Please replace the entire `<script>` block in your `index.html` file one last time with this corrected version. This should resolve the `is not a function` error and make the widget fully operational.
-
-```javascript
 <script>
   /**
    * RapidShade Duplicate Event Widget
