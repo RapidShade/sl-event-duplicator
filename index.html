@@ -92,13 +92,26 @@
   <div id="status"></div>
 </div>
 
+You've found the final piece of the puzzle\! My apologies, that error is due to a mistake in my previous code. You are absolutely right; the function is not in the `docApi` object.
+
+The correct function call is **`grist.addRecords()`**, not `grist.docApi.addRecords()`. The Grist API places direct data manipulation functions on the main `grist` object.
+
+I have corrected this in all the necessary places in the script below.
+
+-----
+
+### \#\# Corrected JavaScript Code
+
+Please replace the entire `<script>` block in your `index.html` file one last time with this corrected version. This should resolve the `is not a function` error and make the widget fully operational.
+
+```javascript
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 1.6 (Fixed)
+   * Version: 1.7 (API Corrected)
    * Clones an Event record and its related data across tables.
    */
-  console.log("RapidShade: Widget version 1.6 (Fixed)");
+  console.log("RapidShade: Widget version 1.7 (API Corrected)");
 
   // --- Configuration: match Grist table names and trigger column ---
   const config = {
@@ -200,7 +213,7 @@
       if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
 
       setUIState('processing', 'Creating new Event...');
-      const [newEventId] = await grist.docApi.addRecords(config.tables.EVENTS, [{
+      const [newEventId] = await grist.addRecords(config.tables.EVENTS, [{
         Name:           `${sourceEvent.Name} (Copy)`,
         Sport:          sourceEvent.Sport,
         Period:         targetPeriodId,
@@ -217,8 +230,8 @@
       const activeVersion = versions.find(v => v.fields.IsActive) || versions.sort((a, b) => new Date(b.fields.Date) - new Date(a.fields.Date))[0];
       if (activeVersion) {
           const newVersionData = {...activeVersion.fields, Event: newEventId};
-          delete newVersionData.id; // Ensure we don't try to reuse the old ID
-          await grist.docApi.addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
+          delete newVersionData.id;
+          await grist.addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
       
       setUIState('processing', 'Cloning projected budgets...');
@@ -229,11 +242,11 @@
           ProjectedExpenses: pb.fields.ProjectedExpenses,
           ProjectedRevenues: pb.fields.ProjectedRevenues
         }));
-      if (projectedBudgets.length) await grist.docApi.addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
+      if (projectedBudgets.length) await grist.addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
       setUIState('processing', 'Cloning expenses...');
       for (const exp of allTables.Expenses.filter(e => e.fields.Event === sourceEvent.id)) {
-        const [newExpenseId] = await grist.docApi.addRecords(config.tables.EXPENSES, [{
+        const [newExpenseId] = await grist.addRecords(config.tables.EXPENSES, [{
           Event: newEventId, Category: exp.fields.Category, Budget: exp.fields.Budget, Projected: exp.fields.Projected, Actual: 0, Notes: null
         }]);
         
@@ -241,12 +254,12 @@
           .map(d => ({
             Expense: newExpenseId, Event: newEventId, Supplier: d.fields.Supplier, Description: d.fields.Description, Budget: d.fields.Budget, Actual: 0, Notes: null
           }));
-        if (expenseDetails.length) await grist.docApi.addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
+        if (expenseDetails.length) await grist.addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
 
       setUIState('processing', 'Cloning revenues...');
       for (const rev of allTables.Revenues.filter(r => r.fields.Event === sourceEvent.id)) {
-        const [newRevenueId] = await grist.docApi.addRecords(config.tables.REVENUES, [{
+        const [newRevenueId] = await grist.addRecords(config.tables.REVENUES, [{
           Event: newEventId, Category: rev.fields.Category, Budget: rev.fields.Budget, Projected: rev.fields.Projected, Actual: 0, Notes: null
         }]);
         
@@ -254,7 +267,7 @@
           .map(d => ({
             Revenue: newRevenueId, Event: newEventId, Supplier: d.fields.Supplier, Description: d.fields.Description, Budget: d.fields.Budget, Actual: 0, Notes: null
           }));
-        if (revenueDetails.length) await grist.docApi.addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
+        if (revenueDetails.length) await grist.addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
 
       setUIState('success', `Event '${sourceEvent.Name}' duplicated successfully!`);
