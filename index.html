@@ -95,10 +95,10 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 1.7 (API Corrected)
-   * Clones an Event record and its related data across tables.
+   * Version: 2.0 (Definitive)
+   * Corrects the API call to grist.docApi.addRecords()
    */
-  console.log("RapidShade: Widget version 1.7 (API Corrected)");
+  console.log("RapidShade: Widget version 2.0 (Definitive)");
 
   // --- Configuration: match Grist table names and trigger column ---
   const config = {
@@ -115,12 +115,10 @@
     triggerColumn: "Duplicate_Trigger"
   };
 
-  // In-memory cache for static tables fetched at init
   let allTables = {};
-  // Promise resolver for period selection dialog
   let resolvePeriodSelection = null;
 
-  // --- UI Control Functions (Unchanged) ---
+  // --- UI Control Functions ---
   function setUIState(state, message = '') {
     document.getElementById('initial-state').classList.add('hidden');
     document.getElementById('processing-state').classList.add('hidden');
@@ -200,7 +198,7 @@
       if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
 
       setUIState('processing', 'Creating new Event...');
-      const [newEventId] = await grist.addRecords(config.tables.EVENTS, [{
+      const [newEventId] = await grist.docApi.addRecords(config.tables.EVENTS, [{
         Name:           `${sourceEvent.Name} (Copy)`,
         Sport:          sourceEvent.Sport,
         Period:         targetPeriodId,
@@ -218,7 +216,7 @@
       if (activeVersion) {
           const newVersionData = {...activeVersion.fields, Event: newEventId};
           delete newVersionData.id;
-          await grist.addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
+          await grist.docApi.addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
       
       setUIState('processing', 'Cloning projected budgets...');
@@ -229,11 +227,11 @@
           ProjectedExpenses: pb.fields.ProjectedExpenses,
           ProjectedRevenues: pb.fields.ProjectedRevenues
         }));
-      if (projectedBudgets.length) await grist.addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
+      if (projectedBudgets.length) await grist.docApi.addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
       setUIState('processing', 'Cloning expenses...');
       for (const exp of allTables.Expenses.filter(e => e.fields.Event === sourceEvent.id)) {
-        const [newExpenseId] = await grist.addRecords(config.tables.EXPENSES, [{
+        const [newExpenseId] = await grist.docApi.addRecords(config.tables.EXPENSES, [{
           Event: newEventId, Category: exp.fields.Category, Budget: exp.fields.Budget, Projected: exp.fields.Projected, Actual: 0, Notes: null
         }]);
         
@@ -241,12 +239,12 @@
           .map(d => ({
             Expense: newExpenseId, Event: newEventId, Supplier: d.fields.Supplier, Description: d.fields.Description, Budget: d.fields.Budget, Actual: 0, Notes: null
           }));
-        if (expenseDetails.length) await grist.addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
+        if (expenseDetails.length) await grist.docApi.addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
 
       setUIState('processing', 'Cloning revenues...');
       for (const rev of allTables.Revenues.filter(r => r.fields.Event === sourceEvent.id)) {
-        const [newRevenueId] = await grist.addRecords(config.tables.REVENUES, [{
+        const [newRevenueId] = await grist.docApi.addRecords(config.tables.REVENUES, [{
           Event: newEventId, Category: rev.fields.Category, Budget: rev.fields.Budget, Projected: rev.fields.Projected, Actual: 0, Notes: null
         }]);
         
@@ -254,7 +252,7 @@
           .map(d => ({
             Revenue: newRevenueId, Event: newEventId, Supplier: d.fields.Supplier, Description: d.fields.Description, Budget: d.fields.Budget, Actual: 0, Notes: null
           }));
-        if (revenueDetails.length) await grist.addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
+        if (revenueDetails.length) await grist.docApi.addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
 
       setUIState('success', `Event '${sourceEvent.Name}' duplicated successfully!`);
