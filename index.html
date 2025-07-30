@@ -303,9 +303,8 @@
         const newExpenseIds = await addRecords(config.tables.EXPENSES, [{
           Event: newEventId, 
           Category: exp.fields.Category, 
-          Budget: exp.fields.Budget, 
-          Projected: exp.fields.Projected, 
-          // Removed Actual: 0 - it's a formula column
+          Projected: exp.fields.Projected,
+          // Budget, Actual, and Variance are formula columns - don't set them
           Notes: null
         }]);
         const newExpenseId = newExpenseIds[0];
@@ -315,10 +314,9 @@
             Expense: newExpenseId, 
             Event: newEventId, 
             Supplier: d.fields.Supplier, 
-            Description: d.fields.Description, 
-            Budget: d.fields.Budget, 
-            // Removed Actual: 0 - it's likely a formula column
-            Notes: null
+            Description: d.fields.Description
+            // Budget, Actual, and Variance are formula columns - don't set them
+            // Notes: null - removed to keep it minimal
           }));
         if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
@@ -328,10 +326,9 @@
         const newRevenueIds = await addRecords(config.tables.REVENUES, [{
           Event: newEventId, 
           Category: rev.fields.Category, 
-          Budget: rev.fields.Budget, 
-          Projected: rev.fields.Projected, 
-          // Removed Actual: 0 - it's a formula column
-          Notes: null
+          Projected: rev.fields.Projected
+          // Budget, Actual, and Variance are formula columns - don't set them
+          // Notes: null - removed to keep it minimal
         }]);
         const newRevenueId = newRevenueIds[0];
         
@@ -340,10 +337,9 @@
             Revenue: newRevenueId, 
             Event: newEventId, 
             Supplier: d.fields.Supplier, 
-            Description: d.fields.Description, 
-            Budget: d.fields.Budget, 
-            // Removed Actual: 0 - it's likely a formula column
-            Notes: null
+            Description: d.fields.Description
+            // Budget, Actual, and Variance are formula columns - don't set them
+            // Notes: null - removed to keep it minimal
           }));
         if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
