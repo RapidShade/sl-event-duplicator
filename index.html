@@ -187,6 +187,25 @@
   });
 
   /**
+   * Helper function to adjust dates to the target period's year
+   */
+  function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
+    if (!sourceDate || !targetPeriodYear) return sourceDate;
+    
+    try {
+      const date = new Date(sourceDate);
+      if (isNaN(date.getTime())) return sourceDate; // Invalid date, return as-is
+      
+      // Keep the same month and day, but change the year to target period's year
+      date.setFullYear(targetPeriodYear);
+      return date.toISOString().split('T')[0]; // Return as YYYY-MM-DD format
+    } catch (e) {
+      console.log("RapidShade: Error adjusting date:", e);
+      return sourceDate; // Return original if there's an error
+    }
+  }
+
+  /**
    * Helper function to add records using applyUserActions
    */
   async function addRecords(tableName, records) {
@@ -247,30 +266,79 @@
       const targetPeriodId = await promptForPeriod(periods);
       if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
 
+      // Get the target period details for year adjustment
+      const targetPeriod = periods.find(p => p.id === targetPeriodId);
+      const targetPeriodName = targetPeriod ? targetPeriod.fields.Name : '';
+      
+      // Extract year from period name (assuming format like "2024-2025" or "2025")
+      let targetYear = new Date().getFullYear(); // Default to current year
+      if (targetPeriodName) {
+        const yearMatch = targetPeriodName.match(/(\d{4})/);
+        if (yearMatch) {
+          targetYear = parseInt(yearMatch[1], 10);
+        }
+      }
+      
+      console.log("RapidShade: Target period:", targetPeriodName, "Target year:", targetYear);
+
       setUIState('processing', 'Creating new Event...');
       
       // Ensure we access the fields properly - sourceEvent might be normalized or raw
-      const eventName = actualSourceEvent.fields ? actualSourceEvent.fields.Name : actualSourceEvent.Name;
-      const eventSport = actualSourceEvent.fields ? actualSourceEvent.fields.Sport : actualSourceEvent.Sport;
-      const eventLocationScope = actualSourceEvent.fields ? actualSourceEvent.fields.LocationScope : actualSourceEvent.LocationScope;
-      const eventType = actualSourceEvent.fields ? actualSourceEvent.fields.EventType : actualSourceEvent.EventType;
-      const sourceEventId = actualSourceEvent.id;
-      
-      console.log("RapidShade: Extracted values:", {eventName, eventSport, eventLocationScope, eventType, sourceEventId});
-      
-      const newEventData = {
-        Name:           `${eventName || 'Unknown'} (Copy)`,
-        Period:         targetPeriodId,
-        EventStatus:    1,
-        DateStart:      null,
-        DateEnd:        null,
-        Notes:          null,
+      const getField = (fieldName) => {
+        return actualSourceEvent.fields ? actualSourceEvent.fields[fieldName] : actualSourceEvent[fieldName];
       };
       
-      // Only add non-null values to avoid issues
-      if (eventSport !== null && eventSport !== undefined) newEventData.Sport = eventSport;
-      if (eventLocationScope !== null && eventLocationScope !== undefined) newEventData.LocationScope = eventLocationScope;
-      if (eventType !== null && eventType !== undefined) newEventData.EventType = eventType;
+      const eventName = getField('Name');
+      const eventSport = getField('Sport');
+      const eventLocationScope = getField('LocationScope');
+      const eventType = getField('EventType');
+      const eventDateStart = getField('DateStart');
+      const eventDateEnd = getField('DateEnd');
+      const eventAbbr = getField('Abbr');
+      const eventInstitute = getField('EventInstitute');
+      const eventDisplayStyle = getField('DisplayStyle');
+      const eventPerifCity = getField('PERIF_CITY');
+      const eventCity = getField('CITY');
+      const eventVenue = getField('VENUE');
+      const eventPoolSize = getField('POOL_SIZE');
+      const eventLevel = getField('LEVEL');
+      const sourceEventId = actualSourceEvent.id;
+      
+      console.log("RapidShade: Extracted values:", {
+        eventName, eventSport, eventLocationScope, eventType, 
+        eventDateStart, eventDateEnd, eventAbbr, eventInstitute,
+        eventDisplayStyle, eventPerifCity, eventCity, eventVenue,
+        eventPoolSize, eventLevel, sourceEventId
+      });
+      
+      const newEventData = {
+        Name: `${eventName || 'Unknown'} (Copy)`,
+        Period: targetPeriodId,
+        EventStatus: 1,
+        // Copy all the requested fields
+        Sport: eventSport,
+        LocationScope: eventLocationScope,
+        EventType: eventType,
+        Abbr: eventAbbr,
+        EventInstitute: eventInstitute,
+        DisplayStyle: eventDisplayStyle,
+        PERIF_CITY: eventPerifCity,
+        CITY: eventCity,
+        VENUE: eventVenue,
+        POOL_SIZE: eventPoolSize,  
+        LEVEL: eventLevel,
+        // Adjust dates to target year
+        DateStart: adjustDateToTargetYear(eventDateStart, targetYear),
+        DateEnd: adjustDateToTargetYear(eventDateEnd, targetYear),
+        Notes: null,
+      };
+      
+      // Remove undefined/null values to avoid issues
+      Object.keys(newEventData).forEach(key => {
+        if (newEventData[key] === undefined) {
+          delete newEventData[key];
+        }
+      });
       
       console.log("RapidShade: New event data:", newEventData);
       
