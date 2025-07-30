@@ -222,11 +222,26 @@
    * Main duplication workflow
    */
   async function duplicateEvent(sourceEvent) {
-    if (!sourceEvent) return;
+    if (!sourceEvent) {
+      console.log("RapidShade: No source event provided");
+      return;
+    }
     
     console.log("RapidShade: Source event data:", sourceEvent);
     
     try {
+      // Try to get the current selected record for better data access
+      let actualSourceEvent = sourceEvent;
+      try {
+        const selectedRecord = await grist.view.fetchSelectedRecord();
+        console.log("RapidShade: Selected record:", selectedRecord);
+        if (selectedRecord && selectedRecord.id) {
+          actualSourceEvent = selectedRecord;
+        }
+      } catch (e) {
+        console.log("RapidShade: Could not fetch selected record, using provided data");
+      }
+      
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
@@ -235,25 +250,31 @@
       setUIState('processing', 'Creating new Event...');
       
       // Ensure we access the fields properly - sourceEvent might be normalized or raw
-      const eventName = sourceEvent.fields ? sourceEvent.fields.Name : sourceEvent.Name;
-      const eventSport = sourceEvent.fields ? sourceEvent.fields.Sport : sourceEvent.Sport;
-      const eventLocationScope = sourceEvent.fields ? sourceEvent.fields.LocationScope : sourceEvent.LocationScope;
-      const eventType = sourceEvent.fields ? sourceEvent.fields.EventType : sourceEvent.EventType;
-      const sourceEventId = sourceEvent.id;
+      const eventName = actualSourceEvent.fields ? actualSourceEvent.fields.Name : actualSourceEvent.Name;
+      const eventSport = actualSourceEvent.fields ? actualSourceEvent.fields.Sport : actualSourceEvent.Sport;
+      const eventLocationScope = actualSourceEvent.fields ? actualSourceEvent.fields.LocationScope : actualSourceEvent.LocationScope;
+      const eventType = actualSourceEvent.fields ? actualSourceEvent.fields.EventType : actualSourceEvent.EventType;
+      const sourceEventId = actualSourceEvent.id;
       
       console.log("RapidShade: Extracted values:", {eventName, eventSport, eventLocationScope, eventType, sourceEventId});
       
-      const newEventIds = await addRecords(config.tables.EVENTS, [{
+      const newEventData = {
         Name:           `${eventName || 'Unknown'} (Copy)`,
-        Sport:          eventSport,
         Period:         targetPeriodId,
-        LocationScope:  eventLocationScope,
         EventStatus:    1,
-        EventType:      eventType,
         DateStart:      null,
         DateEnd:        null,
         Notes:          null,
-      }]);
+      };
+      
+      // Only add non-null values to avoid issues
+      if (eventSport !== null && eventSport !== undefined) newEventData.Sport = eventSport;
+      if (eventLocationScope !== null && eventLocationScope !== undefined) newEventData.LocationScope = eventLocationScope;
+      if (eventType !== null && eventType !== undefined) newEventData.EventType = eventType;
+      
+      console.log("RapidShade: New event data:", newEventData);
+      
+      const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
       console.log("RapidShade: New event created with ID:", newEventId);
@@ -284,7 +305,7 @@
           Category: exp.fields.Category, 
           Budget: exp.fields.Budget, 
           Projected: exp.fields.Projected, 
-          Actual: 0, 
+          // Removed Actual: 0 - it's a formula column
           Notes: null
         }]);
         const newExpenseId = newExpenseIds[0];
@@ -296,7 +317,7 @@
             Supplier: d.fields.Supplier, 
             Description: d.fields.Description, 
             Budget: d.fields.Budget, 
-            Actual: 0, 
+            // Removed Actual: 0 - it's likely a formula column
             Notes: null
           }));
         if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
@@ -309,7 +330,7 @@
           Category: rev.fields.Category, 
           Budget: rev.fields.Budget, 
           Projected: rev.fields.Projected, 
-          Actual: 0, 
+          // Removed Actual: 0 - it's a formula column
           Notes: null
         }]);
         const newRevenueId = newRevenueIds[0];
@@ -321,7 +342,7 @@
             Supplier: d.fields.Supplier, 
             Description: d.fields.Description, 
             Budget: d.fields.Budget, 
-            Actual: 0, 
+            // Removed Actual: 0 - it's likely a formula column
             Notes: null
           }));
         if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
