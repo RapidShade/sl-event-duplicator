@@ -5,102 +5,48 @@
   <title>Duplicate Event Widget</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
-    /*
-      Basic widget styling:
-      - Centered container
-      - Spinner animation during processing
-      - `.hidden` class to toggle visibility
-    */
-    body {
-      font-family: sans-serif;
-      padding: 1rem;
-      text-align: center;
-      color: #333;
-      background-color: #f9f9f9;
-    }
-    #widget-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-    }
+    /* Basic widget styling */
+    body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
+    #widget-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
     .hidden { display: none !important; }
-    #loader {
-      border: 4px solid #f3f3f3;
-      border-top: 4px solid #3498db;
-      border-radius: 50%;
-      width: 30px;
-      height: 30px;
-      animation: spin 1s linear infinite;
-      margin-bottom: 1rem;
-    }
-    #period-selector-container {
-      padding: 1rem;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      background-color: white;
-    }
-    select, button {
-      padding: 8px 12px;
-      margin-top: 10px;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-    }
-    button {
-      background-color: #4CAF50;
-      color: white;
-      cursor: pointer;
-    }
-    #status {
-      margin-top: 1rem;
-      font-weight: bold;
-    }
+    #loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
+    #period-selector-container { padding: 1rem; border: 1px solid #ccc; border-radius: 8px; background-color: white; }
+    select, button { padding: 8px 12px; margin-top: 10px; border-radius: 4px; border: 1px solid #ccc; }
+    button { background-color: #4CAF50; color: white; cursor: pointer; }
+    #status { margin-top: 1rem; font-weight: bold; }
     .status-success { color: green; }
     .status-error   { color: red; }
     .status-info    { color: #555; }
-    @keyframes spin {
-      0%   { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
 
 <div id="widget-container">
-  <!-- Initial idle state: instruct user to click Duplicate_Trigger -->
   <div id="initial-state">
     <h2>Duplicate Event Widget</h2>
     <p>Click the "Duplicate Event" button in your Events table to start.</p>
   </div>
-
-  <!-- Processing state: spinner + message -->
   <div id="processing-state" class="hidden">
     <div id="loader"></div>
     <p id="processing-message">Working...</p>
   </div>
-
-  <!-- Period selection state: dropdown + confirm/cancel buttons -->
   <div id="period-selector-container" class="hidden">
     <label for="period-select">Select Target Period:</label><br>
     <select id="period-select"></select><br>
     <button id="confirm-duplication">Confirm & Duplicate</button>
     <button id="cancel-duplication">Cancel</button>
   </div>
-
-  <!-- Status message area for success/error/info -->
   <div id="status"></div>
 </div>
 
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.6 (Adds debugging for record ID)
-   * Uses correct grist.docApi.applyUserActions() instead of addRecords()
+   * Version: 2.7 (Uses getCursor to find the correct record)
    */
-  console.log("RapidShade: Widget version 2.6 (Adds debugging for record ID)");
+  console.log("RapidShade: Widget version 2.7 (Uses getCursor to find the correct record)");
 
-  // --- Configuration: match Grist table names and trigger column ---
   const config = {
     tables: {
       EVENTS:                 "Events",
@@ -117,7 +63,6 @@
 
   let resolvePeriodSelection = null;
 
-  // --- UI Control Functions ---
   function setUIState(state, message = '') {
     document.getElementById('initial-state').classList.add('hidden');
     document.getElementById('processing-state').classList.add('hidden');
@@ -135,18 +80,14 @@
       const el = document.getElementById('status');
       el.textContent = message;
       el.className = `status-${state}`;
-      // For info, don't show the initial state, just the message.
-      if (state !== 'info') {
-        document.getElementById('initial-state').classList.remove('hidden');
-      }
+      document.getElementById('initial-state').classList.remove('hidden');
     }
   }
 
   function normalizeTableData(tableData) {
     if (Array.isArray(tableData)) return tableData;
     const keys = Object.keys(tableData);
-    const idIndex = keys.indexOf('id');
-    if (idIndex === -1) throw new Error("Table data is missing 'id' column.");
+    if (keys.indexOf('id') === -1) throw new Error("Table data is missing 'id' column.");
     const numRecords = tableData.id.length;
     const records = [];
     for (let i = 0; i < numRecords; i++) {
@@ -188,78 +129,40 @@
     setUIState('initial');
   });
 
-  /**
-   * Helper function to adjust dates to the target period's year
-   */
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
     if (!sourceDate || !targetPeriodYear) return sourceDate;
-    
     try {
       const date = new Date(sourceDate);
-      if (isNaN(date.getTime())) return sourceDate; // Invalid date, return as-is
-      
-      // Keep the same month and day, but change the year to target period's year
+      if (isNaN(date.getTime())) return sourceDate;
       date.setFullYear(targetPeriodYear);
-      return date.toISOString().split('T')[0]; // Return as YYYY-MM-DD format
+      return date.toISOString().split('T')[0];
     } catch (e) {
       console.log("RapidShade: Error adjusting date:", e);
-      return sourceDate; // Return original if there's an error
+      return sourceDate;
     }
   }
 
-  /**
-   * Helper function to add records using applyUserActions
-   */
   async function addRecords(tableName, records) {
     if (!records || records.length === 0) return [];
-    
-    // Convert records to the format expected by AddRecord action
-    const actions = records.map(record => [
-      'AddRecord',
-      tableName,
-      null, // let Grist assign the ID
-      record
-    ]);
-    
-    // Apply all actions and get the results
+    const actions = records.map(record => ['AddRecord', tableName, null, record]);
     const results = await grist.docApi.applyUserActions(actions);
-    
-    // The result from applyUserActions is an object with retValues array
-    // Each AddRecord action returns the new record ID
     if (results && results.retValues && Array.isArray(results.retValues)) {
       return results.retValues;
     }
-    
-    // Fallback: if results is directly an array
-    if (Array.isArray(results)) {
-      return results;
-    }
-    
-    // If single result, wrap in array
-    return [results];
+    return Array.isArray(results) ? results : [results];
   }
 
-  /**
-   * Main duplication workflow
-   */
-  async function duplicateEvent(sourceEventTrigger) {
-    if (!sourceEventTrigger || !sourceEventTrigger.id) {
-      console.log("RapidShade: No source event trigger provided.");
-      return;
-    }
-
+  async function duplicateEvent() {
     try {
-      const sourceEventId = parseInt(sourceEventTrigger.id, 10);
-      
-      // --- DEBUGGING STEP ---
-      // Show the user which ID we are about to process.
-      setUIState('info', `Preparing to duplicate Event ID: ${sourceEventId}`);
-      // Pause for a moment so the user can see the message.
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // --- FIX: Use getCursor() to find the active row, ignore the trigger record ---
+      const cursor = await grist.docApi.getCursor();
+      if (!cursor || !cursor.rowId) {
+        setUIState('error', 'Could not determine the selected row.');
+        return;
+      }
+      const sourceEventId = cursor.rowId;
+      console.log("RapidShade: Found cursor at Event ID:", sourceEventId);
 
-      console.log("RapidShade: Triggered for Event ID:", sourceEventId);
-
-      // Fetch the full source event record using the ID from the trigger.
       const eventsTable = await grist.docApi.fetchTable(config.tables.EVENTS);
       const allEvents = normalizeTableData(eventsTable);
       const sourceEvent = allEvents.find(e => e.id === sourceEventId);
@@ -273,7 +176,7 @@
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
-      if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
+      if (!targetPeriodId) { setUIState('initial'); return; }
 
       const targetPeriod = periods.find(p => p.id === targetPeriodId);
       const targetPeriodName = targetPeriod ? targetPeriod.fields.Name : '';
@@ -311,8 +214,6 @@
       newEventData.Notes = null;
       newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetYear);
       newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetYear);
-      
-      console.log("RapidShade: New event data:", newEventData);
       
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
@@ -369,12 +270,12 @@
     }
   }
 
-  // --- Initialization ---
   grist.ready({
     requiredAccess: 'full',
-    columns: [config.triggerColumn]
+    columns: [config.triggerColumn],
   });
 
+  // We are not using the record from onRecord anymore, but we still use it as the trigger.
   grist.onRecord(duplicateEvent);
 </script>
 </body>
