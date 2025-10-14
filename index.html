@@ -95,10 +95,10 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.3 (Final fix attempt for record fetching)
+   * Version: 2.4 (Excludes formula columns from duplication)
    * Uses correct grist.docApi.applyUserActions() instead of addRecords()
    */
-  console.log("RapidShade: Widget version 2.3 (Final fix attempt for record fetching)");
+  console.log("RapidShade: Widget version 2.4 (Excludes formula columns from duplication)");
 
   // --- Configuration: match Grist table names and trigger column ---
   const config = {
@@ -284,6 +284,21 @@
       const newEventData = { ...sourceEvent.fields };
       delete newEventData.id;
 
+      // ---- FIX: EXCLUDE ALL FORMULA AND HELPER COLUMNS ----
+      const formulaColumns = [
+        'DisplayStyle', 'EventCode', 'Duplicate_Trigger',
+        'total_budgeted_expense', 'total_actual_expense', 'expense_diff', 'expense_diff_percent',
+        'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff', 'revenue_diff_percent',
+        'projected_budget', 'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3'
+      ];
+      // Also remove any columns starting with 'gristHelper_'
+      Object.keys(newEventData).forEach(key => {
+        if (key.startsWith('gristHelper_') || formulaColumns.includes(key)) {
+          delete newEventData[key];
+        }
+      });
+      
+      // Set fields for the new record
       newEventData.Name = `${sourceEvent.fields.Name || 'Unknown'} (Copy)`;
       newEventData.Period = targetPeriodId;
       newEventData.EventStatus = 1;
