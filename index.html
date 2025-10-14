@@ -95,10 +95,10 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.5 (Fixes incorrect record matching)
+   * Version: 2.6 (Adds debugging for record ID)
    * Uses correct grist.docApi.applyUserActions() instead of addRecords()
    */
-  console.log("RapidShade: Widget version 2.5 (Fixes incorrect record matching)");
+  console.log("RapidShade: Widget version 2.6 (Adds debugging for record ID)");
 
   // --- Configuration: match Grist table names and trigger column ---
   const config = {
@@ -135,7 +135,10 @@
       const el = document.getElementById('status');
       el.textContent = message;
       el.className = `status-${state}`;
-      document.getElementById('initial-state').classList.remove('hidden');
+      // For info, don't show the initial state, just the message.
+      if (state !== 'info') {
+        document.getElementById('initial-state').classList.remove('hidden');
+      }
     }
   }
 
@@ -246,8 +249,14 @@
     }
 
     try {
-      // --- FIX: Ensure the ID is treated as a number for matching ---
       const sourceEventId = parseInt(sourceEventTrigger.id, 10);
+      
+      // --- DEBUGGING STEP ---
+      // Show the user which ID we are about to process.
+      setUIState('info', `Preparing to duplicate Event ID: ${sourceEventId}`);
+      // Pause for a moment so the user can see the message.
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
       console.log("RapidShade: Triggered for Event ID:", sourceEventId);
 
       // Fetch the full source event record using the ID from the trigger.
