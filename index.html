@@ -95,10 +95,10 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.2 (Corrected source record fetching)
+   * Version: 2.3 (Final fix attempt for record fetching)
    * Uses correct grist.docApi.applyUserActions() instead of addRecords()
    */
-  console.log("RapidShade: Widget version 2.2 (Corrected source record fetching)");
+  console.log("RapidShade: Widget version 2.3 (Final fix attempt for record fetching)");
 
   // --- Configuration: match Grist table names and trigger column ---
   const config = {
@@ -139,12 +139,28 @@
     }
   }
 
-  // The normalizeTableData function is no longer needed with the new approach
-  // of fetching records directly.
+  function normalizeTableData(tableData) {
+    if (Array.isArray(tableData)) return tableData;
+    const keys = Object.keys(tableData);
+    const idIndex = keys.indexOf('id');
+    if (idIndex === -1) throw new Error("Table data is missing 'id' column.");
+    const numRecords = tableData.id.length;
+    const records = [];
+    for (let i = 0; i < numRecords; i++) {
+        const record = { id: tableData.id[i], fields: {} };
+        for (const key of keys) {
+            if (key !== 'id') {
+                record.fields[key] = tableData[key][i];
+            }
+        }
+        records.push(record);
+    }
+    return records;
+  }
 
   async function getPeriodsData() {
-    // We can directly use the result of fetchTable, which is an array of records.
-    return await grist.docApi.fetchTable(config.tables.PERIODS);
+    const raw = await grist.docApi.fetchTable(config.tables.PERIODS);
+    return normalizeTableData(raw);
   }
 
   async function promptForPeriod(periods) {
@@ -154,7 +170,7 @@
     periods.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;
-      opt.textContent = p.Name; // Fields are direct properties
+      opt.textContent = p.fields.Name;
       sel.appendChild(opt);
     });
     setUIState('selecting');
@@ -223,18 +239,27 @@
   /**
    * Main duplication workflow
    */
-  async function duplicateEvent() {
+  async function duplicateEvent(sourceEventTrigger) {
+    // The record passed by onRecord might be partial. We must fetch the full record.
+    if (!sourceEventTrigger || !sourceEventTrigger.id) {
+      console.log("RapidShade: No source event trigger provided.");
+      return;
+    }
+
     try {
-      const sourceEvent = await grist.view.fetchSelectedRecord();
-      if (!sourceEvent || !sourceEvent.id) {
-        console.log("RapidShade: No event selected for duplication.");
-        // We can optionally show a message to the user here.
-        return;
+      const sourceEventId = sourceEventTrigger.id;
+      console.log("RapidShade: Triggered for Event ID:", sourceEventId);
+
+      // Fetch the full source event record using the ID from the trigger.
+      const eventsTable = await grist.docApi.fetchTable(config.tables.EVENTS);
+      const allEvents = normalizeTableData(eventsTable);
+      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
+
+      if (!sourceEvent) {
+        throw new Error(`Could not find the event with ID ${sourceEventId}.`);
       }
       
-      const sourceEventId = sourceEvent.id;
-      console.log("RapidShade: Duplicating Event ID:", sourceEventId);
-      console.log("RapidShade: Source event data:", sourceEvent);
+      console.log("RapidShade: Full source event data:", sourceEvent);
       
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
@@ -242,7 +267,7 @@
       if (!targetPeriodId) return setUIState('info', 'Duplication canceled.');
 
       const targetPeriod = periods.find(p => p.id === targetPeriodId);
-      const targetPeriodName = targetPeriod ? targetPeriod.Name : '';
+      const targetPeriodName = targetPeriod ? targetPeriod.fields.Name : '';
       
       let targetYear = new Date().getFullYear();
       if (targetPeriodName) {
@@ -256,17 +281,15 @@
 
       setUIState('processing', 'Creating new Event...');
       
-      // Dynamically copy all fields from the source event
-      const newEventData = { ...sourceEvent };
-      delete newEventData.id; // Remove the original ID
+      const newEventData = { ...sourceEvent.fields };
+      delete newEventData.id;
 
-      // Set/override specific fields for the new event
-      newEventData.Name = `${sourceEvent.Name || 'Unknown'} (Copy)`;
+      newEventData.Name = `${sourceEvent.fields.Name || 'Unknown'} (Copy)`;
       newEventData.Period = targetPeriodId;
-      newEventData.EventStatus = 1; // Assuming '1' is a default status for new events
+      newEventData.EventStatus = 1;
       newEventData.Notes = null;
-      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.DateStart, targetYear);
-      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.DateEnd, targetYear);
+      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetYear);
+      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetYear);
       
       console.log("RapidShade: New event data:", newEventData);
       
@@ -275,63 +298,50 @@
       
       console.log("RapidShade: New event created with ID:", newEventId);
 
-      // --- Clone Child Records ---
-      // The logic for cloning children remains similar, but we'll fetch them 
-      // using the correct sourceEventId and ensure we're using direct field access.
-
       setUIState('processing', 'Cloning budget version...');
-      const versions = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
-      const activeVersion = versions.find(v => v.IsActive) || versions.sort((a, b) => new Date(b.Date) - new Date(a.Date))[0];
+      const versionsRaw = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
+      const versions = normalizeTableData(versionsRaw);
+      const activeVersion = versions.find(v => v.fields.IsActive) || versions.sort((a, b) => new Date(b.fields.Date) - new Date(a.fields.Date))[0];
       if (activeVersion) {
-          const newVersionData = {...activeVersion, Event: newEventId};
+          const newVersionData = {...activeVersion.fields, Event: newEventId};
           delete newVersionData.id;
           await addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
       
       setUIState('processing', 'Cloning projected budgets...');
-      const projectedBudgets = await grist.docApi.fetchTable(config.tables.PROJECTED_BUDGETS, { Event: [sourceEventId] });
-      const newProjectedBudgets = projectedBudgets.map(pb => {
-        const newData = { ...pb, Event: newEventId };
-        delete newData.id;
-        return newData;
-      });
-      if (newProjectedBudgets.length) await addRecords(config.tables.PROJECTED_BUDGETS, newProjectedBudgets);
+      const projectedBudgetsRaw = await grist.docApi.fetchTable(config.tables.PROJECTED_BUDGETS, { Event: [sourceEventId] });
+      const projectedBudgets = normalizeTableData(projectedBudgetsRaw).map(pb => ({ ...pb.fields, Event: newEventId, id: undefined }));
+      if (projectedBudgets.length) await addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
       setUIState('processing', 'Cloning expenses...');
-      const expenses = await grist.docApi.fetchTable(config.tables.EXPENSES, { Event: [sourceEventId] });
+      const expensesRaw = await grist.docApi.fetchTable(config.tables.EXPENSES, { Event: [sourceEventId] });
+      const expenses = normalizeTableData(expensesRaw);
       for (const exp of expenses) {
-        const newExpenseData = { ...exp, Event: newEventId, Notes: null };
+        const newExpenseData = { ...exp.fields, Event: newEventId, Notes: null };
         delete newExpenseData.id;
         const newExpenseIds = await addRecords(config.tables.EXPENSES, [newExpenseData]);
         const newExpenseId = newExpenseIds[0];
         
-        const expenseDetails = await grist.docApi.fetchTable(config.tables.EXPENSE_DETAILS, { Expense: [exp.id] });
-        const newExpenseDetails = expenseDetails.map(d => {
-            const newData = { ...d, Expense: newExpenseId, Event: newEventId };
-            delete newData.id;
-            return newData;
-        });
-        if (newExpenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, newExpenseDetails);
+        const expenseDetailsRaw = await grist.docApi.fetchTable(config.tables.EXPENSE_DETAILS, { Expense: [exp.id] });
+        const expenseDetails = normalizeTableData(expenseDetailsRaw).map(d => ({ ...d.fields, Expense: newExpenseId, Event: newEventId, id: undefined }));
+        if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
 
       setUIState('processing', 'Cloning revenues...');
-      const revenues = await grist.docApi.fetchTable(config.tables.REVENUES, { Event: [sourceEventId] });
+      const revenuesRaw = await grist.docApi.fetchTable(config.tables.REVENUES, { Event: [sourceEventId] });
+      const revenues = normalizeTableData(revenuesRaw);
       for (const rev of revenues) {
-        const newRevenueData = { ...rev, Event: newEventId, Notes: null };
+        const newRevenueData = { ...rev.fields, Event: newEventId, Notes: null };
         delete newRevenueData.id;
         const newRevenueIds = await addRecords(config.tables.REVENUES, [newRevenueData]);
         const newRevenueId = newRevenueIds[0];
         
-        const revenueDetails = await grist.docApi.fetchTable(config.tables.REVENUE_DETAILS, { Revenue: [rev.id] });
-        const newRevenueDetails = revenueDetails.map(d => {
-            const newData = { ...d, Revenue: newRevenueId, Event: newEventId };
-            delete newData.id;
-            return newData;
-        });
-        if (newRevenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, newRevenueDetails);
+        const revenueDetailsRaw = await grist.docApi.fetchTable(config.tables.REVENUE_DETAILS, { Revenue: [rev.id] });
+        const revenueDetails = normalizeTableData(revenueDetailsRaw).map(d => ({ ...d.fields, Revenue: newRevenueId, Event: newEventId, id: undefined }));
+        if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
 
-      setUIState('success', `Event '${sourceEvent.Name || 'Unknown'}' duplicated successfully!`);
+      setUIState('success', `Event '${sourceEvent.fields.Name || 'Unknown'}' duplicated successfully!`);
     } catch (err) {
       console.error('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message}`);
