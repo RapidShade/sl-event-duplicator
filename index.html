@@ -43,9 +43,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 3.2 (Uses onRecords for reliable data change trigger)
+   * Version: 3.3 (Simplifies onRecords logic for reliability)
    */
-  console.log("RapidShade: Widget version 3.2 (Uses onRecords)");
+  console.log("RapidShade: Widget version 3.3 (Simplifies onRecords logic)");
 
   const config = {
     tables: {
@@ -174,7 +174,6 @@
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
       if (!targetPeriodId) { 
-        // If user cancels, reset the trigger
         await grist.docApi.applyUserActions([
           ['UpdateRecord', config.tables.EVENTS, sourceEventId, { [config.triggerColumn]: false }]
         ]);
@@ -210,8 +209,8 @@
       newEventData.Period = targetPeriodId;
       newEventData.EventStatus = 1;
       newEventData.Notes = null;
-      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetPeriodYear);
-      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetPeriodYear);
+      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetYear);
+      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetYear);
       
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
@@ -256,7 +255,7 @@
         
         const revenueDetailsRaw = await grist.docApi.fetchTable(config.tables.REVENUE_DETAILS, { Revenue: [rev.id] });
         const revenueDetails = normalizeTableData(revenueDetailsRaw).map(d => ({ ...d.fields, Revenue: newRevenueId, Event: newEventId, id: undefined }));
-        if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
+        if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
       
       await grist.docApi.applyUserActions([
@@ -276,18 +275,14 @@
   });
 
   // --- FINAL FIX: Use onRecords to listen for data changes ---
-  grist.onRecords(function(records, action) {
+  grist.onRecords(function(records) {
     if (!records) { return; }
-    // Find the specific record that was just triggered.
-    // The action object tells us exactly which rows were modified.
-    if (action && action.verb === 'UpdateRecord' && action.tableId === config.tables.EVENTS) {
-      const updatedRowIds = action.rowIds;
-      // Find the record among the updated ones that has the trigger set to true
-      const triggeredRecord = records.find(r => updatedRowIds.includes(r.id) && r[config.triggerColumn]);
-      if (triggeredRecord) {
-        // We found the one! Call the duplication logic with the correct ID.
-        duplicateEvent(triggeredRecord.id);
-      }
+    // onRecords gives us the full record objects that were changed.
+    // We find the one that was just triggered.
+    const triggeredRecord = records.find(r => r[config.triggerColumn]);
+    if (triggeredRecord) {
+      // We found it! Call the duplication logic with the correct ID.
+      duplicateEvent(triggeredRecord.id);
     }
   });
 
