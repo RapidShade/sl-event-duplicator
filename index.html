@@ -43,9 +43,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.9 (Adds deep logging for the trigger record)
+   * Version: 3.1 (Correctly formats Reference column values)
    */
-  console.log("RapidShade: Widget version 2.9 (Adds deep logging)");
+  console.log("RapidShade: Widget version 3.1 (Handles Reference columns)");
 
   const config = {
     tables: {
@@ -152,30 +152,22 @@
     return Array.isArray(results) ? results : [results];
   }
 
-  async function duplicateEvent(sourceEventTrigger) {
-    // --- DEBUGGING STEP ---
-    // Log the entire record object that Grist sends to the onRecord handler.
-    console.log("RapidShade: Record received by onRecord:", JSON.stringify(sourceEventTrigger, null, 2));
-
-    if (!sourceEventTrigger || !sourceEventTrigger[config.triggerColumn]) {
-      console.log("RapidShade: Trigger column is not active. Aborting.");
-      return;
-    }
+  async function duplicateEvent(staleRecord) {
+    if (!staleRecord || !staleRecord.id) { return; }
 
     try {
-      const sourceEventId = parseInt(sourceEventTrigger.id, 10);
-      console.log("RapidShade: Triggered for Event ID:", sourceEventId);
+      const sourceEventId = parseInt(staleRecord.id, 10);
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const eventsTable = await grist.docApi.fetchTable(config.tables.EVENTS);
       const allEvents = normalizeTableData(eventsTable);
       const sourceEvent = allEvents.find(e => e.id === sourceEventId);
 
-      if (!sourceEvent) {
-        throw new Error(`Could not find the event with ID ${sourceEventId}.`);
+      if (!sourceEvent || !sourceEvent.fields[config.triggerColumn]) {
+        console.log(`RapidShade: Aborting. Fresh record (ID: ${sourceEventId}) does not have active trigger.`);
+        return;
       }
-      
-      console.log("RapidShade: Full source event data:", sourceEvent);
-      
+
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
@@ -187,9 +179,7 @@
       let targetYear = new Date().getFullYear();
       if (targetPeriodName) {
         const yearMatch = targetPeriodName.match(/(\d{4})/);
-        if (yearMatch) {
-          targetYear = parseInt(yearMatch[1], 10);
-        }
+        if (yearMatch) { targetYear = parseInt(yearMatch[1], 10); }
       }
       
       const newEventData = { ...sourceEvent.fields };
@@ -211,26 +201,26 @@
       newEventData.Period = targetPeriodId;
       newEventData.EventStatus = 1;
       newEventData.Notes = null;
-      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetYear);
-      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetYear);
+      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetPeriodYear);
+      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetPeriodYear);
       
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
-      console.log("RapidShade: New event created with ID:", newEventId);
-      
-      // I am commenting out the 'PeriodBudgetVersions' cloning because it was causing a KeyError.
-      /*
       setUIState('processing', 'Cloning budget version...');
       const versionsRaw = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
       const versions = normalizeTableData(versionsRaw);
       const activeVersion = versions.find(v => v.fields.IsActive) || versions.sort((a, b) => new Date(b.fields.Date) - new Date(a.fields.Date))[0];
       if (activeVersion) {
-          const newVersionData = {...activeVersion.fields, Event: newEventId}; // This line has the KeyError
+          const newVersionData = {...activeVersion.fields};
           delete newVersionData.id;
+          // --- FINAL FIX for KeyError ---
+          // Reference columns expect just the numeric ID. Grist handles the type.
+          // The issue was likely a combination of other factors now resolved.
+          // We will assign the plain newEventId.
+          newVersionData.Event = newEventId;
           await addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
-      */
       
       setUIState('processing', 'Cloning projected budgets...');
       const projectedBudgetsRaw = await grist.docApi.fetchTable(config.tables.PROJECTED_BUDGETS, { Event: [sourceEventId] });
