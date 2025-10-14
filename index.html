@@ -43,9 +43,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 2.8 (Checks trigger value to prevent running on load)
+   * Version: 2.9 (Adds deep logging for the trigger record)
    */
-  console.log("RapidShade: Widget version 2.8 (Checks trigger value)");
+  console.log("RapidShade: Widget version 2.9 (Adds deep logging)");
 
   const config = {
     tables: {
@@ -153,7 +153,10 @@
   }
 
   async function duplicateEvent(sourceEventTrigger) {
-    // --- FIX: Only run if the trigger column is true, preventing runs on page load ---
+    // --- DEBUGGING STEP ---
+    // Log the entire record object that Grist sends to the onRecord handler.
+    console.log("RapidShade: Record received by onRecord:", JSON.stringify(sourceEventTrigger, null, 2));
+
     if (!sourceEventTrigger || !sourceEventTrigger[config.triggerColumn]) {
       console.log("RapidShade: Trigger column is not active. Aborting.");
       return;
@@ -215,11 +218,8 @@
       const newEventId = newEventIds[0];
       
       console.log("RapidShade: New event created with ID:", newEventId);
-
-      // --- Child Record Cloning ---
       
       // I am commenting out the 'PeriodBudgetVersions' cloning because it was causing a KeyError.
-      // I need the schema for this table to fix it properly.
       /*
       setUIState('processing', 'Cloning budget version...');
       const versionsRaw = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
@@ -265,7 +265,6 @@
         if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
       
-      // --- FIX: Reset the trigger column on the original record ---
       await grist.docApi.applyUserActions([
         ['UpdateRecord', config.tables.EVENTS, sourceEventId, { [config.triggerColumn]: false }]
       ]);
