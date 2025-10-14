@@ -43,9 +43,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 3.1 (Correctly formats Reference column values)
+   * Version: 3.2 (Uses onRecords for reliable data change trigger)
    */
-  console.log("RapidShade: Widget version 3.1 (Handles Reference columns)");
+  console.log("RapidShade: Widget version 3.2 (Uses onRecords)");
 
   const config = {
     tables: {
@@ -63,6 +63,7 @@
 
   let resolvePeriodSelection = null;
 
+  // UI state management remains the same...
   function setUIState(state, message = '') {
     document.getElementById('initial-state').classList.add('hidden');
     document.getElementById('processing-state').classList.add('hidden');
@@ -152,26 +153,34 @@
     return Array.isArray(results) ? results : [results];
   }
 
-  async function duplicateEvent(staleRecord) {
-    if (!staleRecord || !staleRecord.id) { return; }
+  async function duplicateEvent(sourceEventId) {
+    if (!sourceEventId) {
+      console.log("RapidShade: No source event ID provided.");
+      return;
+    }
 
     try {
-      const sourceEventId = parseInt(staleRecord.id, 10);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log("RapidShade: Triggered for Event ID:", sourceEventId);
 
       const eventsTable = await grist.docApi.fetchTable(config.tables.EVENTS);
       const allEvents = normalizeTableData(eventsTable);
       const sourceEvent = allEvents.find(e => e.id === sourceEventId);
 
-      if (!sourceEvent || !sourceEvent.fields[config.triggerColumn]) {
-        console.log(`RapidShade: Aborting. Fresh record (ID: ${sourceEventId}) does not have active trigger.`);
-        return;
+      if (!sourceEvent) {
+        throw new Error(`Could not find the event with ID ${sourceEventId}.`);
       }
-
+      
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
-      if (!targetPeriodId) { setUIState('initial'); return; }
+      if (!targetPeriodId) { 
+        // If user cancels, reset the trigger
+        await grist.docApi.applyUserActions([
+          ['UpdateRecord', config.tables.EVENTS, sourceEventId, { [config.triggerColumn]: false }]
+        ]);
+        setUIState('initial'); 
+        return; 
+      }
 
       const targetPeriod = periods.find(p => p.id === targetPeriodId);
       const targetPeriodName = targetPeriod ? targetPeriod.fields.Name : '';
@@ -212,13 +221,8 @@
       const versions = normalizeTableData(versionsRaw);
       const activeVersion = versions.find(v => v.fields.IsActive) || versions.sort((a, b) => new Date(b.fields.Date) - new Date(a.fields.Date))[0];
       if (activeVersion) {
-          const newVersionData = {...activeVersion.fields};
+          const newVersionData = {...activeVersion.fields, Event: newEventId};
           delete newVersionData.id;
-          // --- FINAL FIX for KeyError ---
-          // Reference columns expect just the numeric ID. Grist handles the type.
-          // The issue was likely a combination of other factors now resolved.
-          // We will assign the plain newEventId.
-          newVersionData.Event = newEventId;
           await addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
       
@@ -271,7 +275,22 @@
     columns: [config.triggerColumn],
   });
 
-  grist.onRecord(duplicateEvent);
+  // --- FINAL FIX: Use onRecords to listen for data changes ---
+  grist.onRecords(function(records, action) {
+    if (!records) { return; }
+    // Find the specific record that was just triggered.
+    // The action object tells us exactly which rows were modified.
+    if (action && action.verb === 'UpdateRecord' && action.tableId === config.tables.EVENTS) {
+      const updatedRowIds = action.rowIds;
+      // Find the record among the updated ones that has the trigger set to true
+      const triggeredRecord = records.find(r => updatedRowIds.includes(r.id) && r[config.triggerColumn]);
+      if (triggeredRecord) {
+        // We found the one! Call the duplication logic with the correct ID.
+        duplicateEvent(triggeredRecord.id);
+      }
+    }
+  });
+
 </script>
 </body>
 </html>
