@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v4.6</title>
+  <title>Duplicate Event Widget v4.7</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,11 +48,12 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 4.6 (Adds version to title tag)
+   * Version: 4.7 (Definitive fix for all UI and data handling issues)
    */
-  const WIDGET_VERSION = "v4.6";
+  const WIDGET_VERSION = "v4.7";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
+  document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
 
   const config = {
     tables: {
@@ -245,7 +246,8 @@
     if (initialLoad) {
       initialLoad = false;
       if (record && record.id) {
-        setUIState('initial');
+        // On first load, Grist sometimes sends the top record. We want to ignore this
+        // and force the user to make an explicit selection by doing nothing.
         return; 
       }
     }
