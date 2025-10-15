@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v6.3</title>
+  <title>Duplicate Event Widget v6.4</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.3 (Final API-based solution with Column ID debug tool)
+   * Version: 6.4 (Final API-based solution with corrected Column ID debug tool)
    */
-  const WIDGET_VERSION = "v6.3";
+  const WIDGET_VERSION = "v6.4";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -178,16 +178,19 @@
     if (debug.findColumnIds) {
         setUIState('processing', 'Debug mode: Finding Column IDs...');
         try {
-            const allTables = await grist.docApi.listTables();
             console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
-            for (const tableId of allTables) {
-                if (Object.values(config.tables).includes(tableId)) {
-                    const columns = await grist.docApi.listColumns(tableId);
-                    console.log(`\n--- Schema for table '${tableId}' ---`);
-                    console.table(columns.map(c => ({label: c.fields.label, colId: c.fields.colId, type: c.fields.type})));
+            for (const tableId of Object.values(config.tables)) {
+                // This is a robust way to get column IDs by fetching one record.
+                const recordRaw = await grist.docApi.fetchTable(tableId);
+                const record = normalizeTableData(recordRaw)[0];
+                if (record) {
+                    console.log(`\n--- Column IDs for table '${tableId}' ---`);
+                    console.table(Object.keys(record.fields));
+                } else {
+                    console.log(`Table '${tableId}' is empty or could not be read.`);
                 }
             }
-            setUIState('success', 'Debug complete. Check the console, update the config, then set debug flag to false.');
+            setUIState('success', 'Debug complete. Check console, update config, then set debug flag to false.');
         } catch (e) {
             setUIState('error', 'Debug failed: ' + e.message);
         }
@@ -199,8 +202,11 @@
 
     try {
       setUIState('processing', 'Fetching source event...');
-      const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
-      const sourceEvent = normalizeTableData(sourceEventRaw)[0];
+      // FIX: Reverting to the robust "fetch all and find" to prevent the "first record" bug.
+      const allEventsRaw = await grist.docApi.fetchTable(config.tables.EVENTS);
+      const allEvents = normalizeTableData(allEventsRaw);
+      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
+      
       if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
       
       const sourceEventFields = sourceEvent.fields;
@@ -280,10 +286,10 @@
     return (results?.retValues || []).map(r => r?.id || r);
   }
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
-    if (!sourceDate || !targetPeriodYear) return sourceDate;
+    if (!sourceDate || !targetPeriodYear) return date;
     try {
       const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
-      if (isNaN(date.getTime())) return date;
+      if (isNaN(date.getTime())) return sourceDate;
       date.setFullYear(targetPeriodYear);
       return date.getTime() / 1000;
     } catch (e) { return sourceDate; }
