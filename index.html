@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v5.4</title>
+  <title>Duplicate Event Widget v5.5</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -49,9 +49,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 5.4 (Fixes formula field error by expanding exclusion list)
+   * Version: 5.5 (Excludes all parent summary/formula columns)
    */
-  const WIDGET_VERSION = "v5.4";
+  const WIDGET_VERSION = "v5.5";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -75,7 +75,8 @@
   };
 
   /**
-   * FIX: Added formula/helper fields from ALL child tables to prevent errors.
+   * FIX: Added all summary/formula columns from parent tables (Expenses, Revenues)
+   * to the exclusion list. This prevents the "Can't save value" error.
    */
   const FORMULA_COLUMNS_TO_EXCLUDE = [
       // Events Table
@@ -84,10 +85,11 @@
       'total_actual_revenue', 'revenue_diff', 'revenue_diff_percent', 'projected_budget',
       'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3',
       
-      // Expenses & Revenues Tables
-      'Variance',
-      'ExpCode',
-      'RevCode',
+      // Expenses & Revenues Tables (Parent/Summary Tables)
+      'Variance', 'ExpCode', 'RevCode',
+      'Actual',   // Confirmed formula column from error
+      'Budget',   // Likely a summary formula
+      'Projected',// Likely a summary formula
 
       // ExpenseDetails & RevenueDetails Tables
       'ESID'
@@ -199,15 +201,10 @@
     return Array.isArray(results) ? results.map(r => r?.id || r) : [results?.id || results];
   }
 
-  /**
-   * This function now cleans records from ALL tables by checking the
-   * expanded FORMULA_COLUMNS_TO_EXCLUDE list.
-   */
   function cleanRecordData(recordFields) {
       const cleanedData = { ...recordFields };
       delete cleanedData.id;
       Object.keys(cleanedData).forEach(key => {
-        // Check if key starts with gristHelper_ OR is in the exclusion list
         if (key.startsWith('gristHelper_') || FORMULA_COLUMNS_TO_EXCLUDE.includes(key)) {
           delete cleanedData[key];
         }
@@ -224,7 +221,6 @@
       setUIState('processing', `Cloning ${children.length} ${parentTable} records...`);
       const oldChildIds = children.map(c => c.id);
       const newChildrenData = children.map(c => {
-          // cleanRecordData will now strip formula fields from child tables
           const data = cleanRecordData(c.fields); 
           data[parentLinkColumn] = newParentId;
           return data;
@@ -239,7 +235,6 @@
       const newGrandchildrenData = grandchildren.map(gc => {
           const newParentChildId = oldToNewChildIdMap.get(gc.fields[childLinkColumn]);
           if (!newParentChildId) return null;
-          // cleanRecordData will now strip formula fields from grandchild tables
           const data = cleanRecordData(gc.fields); 
           data[childLinkColumn] = newParentChildId;
           return data;
