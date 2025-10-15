@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v5.5</title>
+  <title>Duplicate Event Widget v5.6</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -49,9 +49,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 5.5 (Excludes all parent summary/formula columns)
+   * Version: 5.6 (Corrects typo for 'Viariance' formula column)
    */
-  const WIDGET_VERSION = "v5.5";
+  const WIDGET_VERSION = "v5.6";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -75,8 +75,7 @@
   };
 
   /**
-   * FIX: Added all summary/formula columns from parent tables (Expenses, Revenues)
-   * to the exclusion list. This prevents the "Can't save value" error.
+   * FIX: Corrected typo for 'Viariance' based on the new error log.
    */
   const FORMULA_COLUMNS_TO_EXCLUDE = [
       // Events Table
@@ -86,10 +85,12 @@
       'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3',
       
       // Expenses & Revenues Tables (Parent/Summary Tables)
-      'Variance', 'ExpCode', 'RevCode',
-      'Actual',   // Confirmed formula column from error
-      'Budget',   // Likely a summary formula
-      'Projected',// Likely a summary formula
+      'Viariance', // Corrected typo from 'Variance'
+      'ExpCode',
+      'RevCode',
+      'Actual',   
+      'Budget',   
+      'Projected',
 
       // ExpenseDetails & RevenueDetails Tables
       'ESID'
