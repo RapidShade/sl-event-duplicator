@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v6.4</title>
+  <title>Duplicate Event Widget v6.5</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,29 +48,24 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.4 (Final API-based solution with corrected Column ID debug tool)
+   * Version: 6.5 (Final: Uses grist.sql() for robust and efficient filtering)
    */
-  const WIDGET_VERSION = "v6.4";
+  const WIDGET_VERSION = "v6.5";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
-
-  // STEP 1: Set to true to find Column IDs in the console
-  const debug = {
-    findColumnIds: true 
-  };
   
-  // STEP 2: Update these IDs with the `colId` output from the debug console
   const config = {
     tables: {
       EVENTS: "Events", EXPENSES: "Expenses", EXPENSE_DETAILS: "ExpenseDetails",
       REVENUES: "Revenues", REVENUE_DETAILS: "RevenueDetails", PERIODS: "Periods",
     },
+    // Confirmed from logs that the Column IDs match the Column Names.
     columnIds: {
-      EVENT_LINK: "Event", // <-- VERIFY AND UPDATE THIS
-      EXPENSE_LINK: "Expense", // <-- VERIFY AND UPDATE THIS
-      REVENUE_LINK: "Revenue", // <-- VERIFY AND UPDATE THIS
-      BUDGET_VERSION_LINK: "BudgetVersion" // <-- VERIFY AND UPDATE THIS
+      EVENT_LINK: "Event",
+      EXPENSE_LINK: "Expense",
+      REVENUE_LINK: "Revenue",
+      BUDGET_VERSION_LINK: "BudgetVersion"
     }
   };
 
@@ -108,15 +103,15 @@
     }
   }
 
-  function normalizeTableData(tableData) {
-    if (!tableData || typeof tableData !== 'object' || !tableData.id) return [];
-    const keys = Object.keys(tableData);
-    const numRecords = tableData.id.length;
+  function normalizeSqlData(sqlData) {
+    if (!sqlData || typeof sqlData !== 'object' || !sqlData.id) return [];
+    const keys = Object.keys(sqlData);
+    const numRecords = sqlData.id.length;
     const records = [];
     for (let i = 0; i < numRecords; i++) {
-      const record = { id: tableData.id[i], fields: {} };
+      const record = { id: sqlData.id[i], fields: {} };
       for (const key of keys) {
-        if (key !== 'id') record.fields[key] = tableData[key][i];
+        if (key !== 'id') record.fields[key] = sqlData[key][i];
       }
       records.push(record);
     }
@@ -134,12 +129,14 @@
       return cleanedData;
   }
 
+  /**
+   * FIX: This function now uses grist.sql() for robust, efficient, API-based filtering.
+   */
   async function cloneRelatedRecords(options) {
       const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumnId, childLinkColumnId } = options;
       
-      const filter = { [parentLinkColumnId]: [sourceParentId] };
-      const childrenToCloneRaw = await grist.docApi.fetchTable(parentTable, filter);
-      const childrenToClone = normalizeTableData(childrenToCloneRaw);
+      const childrenToCloneRaw = await grist.sql(`SELECT * FROM ${parentTable} WHERE ${parentLinkColumnId} = ?`, [sourceParentId]);
+      const childrenToClone = normalizeSqlData(childrenToCloneRaw);
 
       if (childrenToClone.length === 0) return;
       setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
@@ -156,9 +153,10 @@
       if (!childTable || !childLinkColumnId || newChildIds.length === 0) return;
       const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
       
-      const grandchildrenFilter = { [childLinkColumnId]: oldChildIds };
-      const grandchildrenToCloneRaw = await grist.docApi.fetchTable(childTable, grandchildrenFilter);
-      const grandchildrenToClone = normalizeTableData(grandchildrenToCloneRaw);
+      // Grist's SQL `IN` operator needs parentheses.
+      const idsPlaceholder = Array(oldChildIds.length).fill('?').join(',');
+      const grandchildrenToCloneRaw = await grist.sql(`SELECT * FROM ${childTable} WHERE ${childLinkColumnId} IN (${idsPlaceholder})`, oldChildIds);
+      const grandchildrenToClone = normalizeSqlData(grandchildrenToCloneRaw);
 
       if (grandchildrenToClone.length === 0) return;
       setUIState('processing', `Cloning ${grandchildrenToClone.length} ${childTable} records...`);
@@ -175,45 +173,20 @@
   }
 
   async function duplicateSelectedEvent() {
-    if (debug.findColumnIds) {
-        setUIState('processing', 'Debug mode: Finding Column IDs...');
-        try {
-            console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
-            for (const tableId of Object.values(config.tables)) {
-                // This is a robust way to get column IDs by fetching one record.
-                const recordRaw = await grist.docApi.fetchTable(tableId);
-                const record = normalizeTableData(recordRaw)[0];
-                if (record) {
-                    console.log(`\n--- Column IDs for table '${tableId}' ---`);
-                    console.table(Object.keys(record.fields));
-                } else {
-                    console.log(`Table '${tableId}' is empty or could not be read.`);
-                }
-            }
-            setUIState('success', 'Debug complete. Check console, update config, then set debug flag to false.');
-        } catch (e) {
-            setUIState('error', 'Debug failed: ' + e.message);
-        }
-        return;
-    }
-
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
     if (!sourceEventId) { setUIState('error', "No event ID selected."); return; }
 
     try {
       setUIState('processing', 'Fetching source event...');
-      // FIX: Reverting to the robust "fetch all and find" to prevent the "first record" bug.
-      const allEventsRaw = await grist.docApi.fetchTable(config.tables.EVENTS);
-      const allEvents = normalizeTableData(allEventsRaw);
-      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
-      
+      const sourceEventRaw = await grist.sql(`SELECT * FROM Events WHERE id = ?`, [sourceEventId]);
+      const sourceEvent = normalizeSqlData(sourceEventRaw)[0];
       if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
       
       const sourceEventFields = sourceEvent.fields;
 
       setUIState('processing', 'Loading periods...');
-      const periodsRaw = await grist.docApi.fetchTable(config.tables.PERIODS);
-      const periods = normalizeTableData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
+      const periodsRaw = await grist.sql(`SELECT id, Name FROM Periods`);
+      const periods = normalizeSqlData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
       if (periods.length === 0) throw new Error('No Periods found to select from.');
       
       populateSelector('period-select', periods);
