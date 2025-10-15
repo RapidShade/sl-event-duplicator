@@ -10,7 +10,7 @@
     #widget-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
     .hidden { display: none !important; }
     #loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
-    #period-selector-container { padding: 1rem; border: 1px solid #ccc; border-radius: 8px; background-color: white; }
+    #period-selector-container, #selection-state { padding: 1rem; border: 1px solid #ccc; border-radius: 8px; background-color: white; }
     select, button { padding: 8px 12px; margin-top: 10px; border-radius: 4px; border: 1px solid #ccc; }
     button { background-color: #4CAF50; color: white; cursor: pointer; }
     #status { margin-top: 1rem; font-weight: bold; }
@@ -25,7 +25,12 @@
 <div id="widget-container">
   <div id="initial-state">
     <h2>Duplicate Event Widget</h2>
-    <p>Click the "Duplicate Event" button in your Events table to start.</p>
+    <p>Select an event in the table to begin.</p>
+  </div>
+  <div id="selection-state" class="hidden">
+    <h3>Selected Event:</h3>
+    <p id="selected-event-name"></p>
+    <button id="start-duplication">Duplicate This Event</button>
   </div>
   <div id="processing-state" class="hidden">
     <div id="loader"></div>
@@ -43,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 3.3 (Simplifies onRecords logic for reliability)
+   * Version: 4.0 (Complete redesign to use onRecord reliably)
    */
-  console.log("RapidShade: Widget version 3.3 (Simplifies onRecords logic)");
+  console.log("RapidShade: Widget version 4.0 (Workflow redesign)");
 
   const config = {
     tables: {
@@ -57,34 +62,41 @@
       REVENUES:               "Revenues",
       REVENUE_DETAILS:        "RevenueDetails",
       PERIOD_BUDGET_VERSIONS: "PeriodBudgetVersions",
-    },
-    triggerColumn: "Duplicate_Trigger"
+    }
   };
 
   let resolvePeriodSelection = null;
+  let selectedEvent = null;
 
-  // UI state management remains the same...
+  // --- UI Control Functions ---
   function setUIState(state, message = '') {
+    // Hide all states first
     document.getElementById('initial-state').classList.add('hidden');
+    document.getElementById('selection-state').classList.add('hidden');
     document.getElementById('processing-state').classList.add('hidden');
     document.getElementById('period-selector-container').classList.add('hidden');
     document.getElementById('status').textContent = '';
 
     if (state === 'initial') {
       document.getElementById('initial-state').classList.remove('hidden');
+    } else if (state === 'selection') {
+      document.getElementById('selection-state').classList.remove('hidden');
+      document.getElementById('selected-event-name').textContent = message;
     } else if (state === 'processing') {
       document.getElementById('processing-state').classList.remove('hidden');
       document.getElementById('processing-message').textContent = message;
     } else if (state === 'selecting') {
       document.getElementById('period-selector-container').classList.remove('hidden');
-    } else if (['success', 'error', 'info'].includes(state)) {
+    } else if (['success', 'error'].includes(state)) {
       const el = document.getElementById('status');
       el.textContent = message;
       el.className = `status-${state}`;
+      // After success or error, go back to the initial state
       document.getElementById('initial-state').classList.remove('hidden');
     }
   }
 
+  // Other helper functions remain the same...
   function normalizeTableData(tableData) {
     if (Array.isArray(tableData)) return tableData;
     const keys = Object.keys(tableData);
@@ -153,31 +165,21 @@
     return Array.isArray(results) ? results : [results];
   }
 
-  async function duplicateEvent(sourceEventId) {
-    if (!sourceEventId) {
-      console.log("RapidShade: No source event ID provided.");
+  async function duplicateSelectedEvent() {
+    if (!selectedEvent) {
+      setUIState('error', "No event selected.");
       return;
     }
 
     try {
-      console.log("RapidShade: Triggered for Event ID:", sourceEventId);
+      const sourceEventId = selectedEvent.id;
+      const sourceEventFields = selectedEvent.fields;
 
-      const eventsTable = await grist.docApi.fetchTable(config.tables.EVENTS);
-      const allEvents = normalizeTableData(eventsTable);
-      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
-
-      if (!sourceEvent) {
-        throw new Error(`Could not find the event with ID ${sourceEventId}.`);
-      }
-      
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
       if (!targetPeriodId) { 
-        await grist.docApi.applyUserActions([
-          ['UpdateRecord', config.tables.EVENTS, sourceEventId, { [config.triggerColumn]: false }]
-        ]);
-        setUIState('initial'); 
+        setUIState('selection', sourceEventFields.Name); // Go back to selection state
         return; 
       }
 
@@ -190,7 +192,7 @@
         if (yearMatch) { targetYear = parseInt(yearMatch[1], 10); }
       }
       
-      const newEventData = { ...sourceEvent.fields };
+      const newEventData = { ...sourceEventFields };
       delete newEventData.id;
 
       const formulaColumns = [
@@ -205,12 +207,12 @@
         }
       });
       
-      newEventData.Name = `${sourceEvent.fields.Name || 'Unknown'} (Copy)`;
+      newEventData.Name = `${sourceEventFields.Name || 'Unknown'} (Copy)`;
       newEventData.Period = targetPeriodId;
       newEventData.EventStatus = 1;
       newEventData.Notes = null;
-      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetYear);
-      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetYear);
+      newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
+      newEventData.DateEnd = adjustDateToTargetYear(sourceEventFields.DateEnd, targetYear);
       
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
@@ -231,6 +233,7 @@
       if (projectedBudgets.length) await addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
       setUIState('processing', 'Cloning expenses...');
+      // (Cloning logic for expenses and revenues remains the same)
       const expensesRaw = await grist.docApi.fetchTable(config.tables.EXPENSES, { Event: [sourceEventId] });
       const expenses = normalizeTableData(expensesRaw);
       for (const exp of expenses) {
@@ -255,36 +258,39 @@
         
         const revenueDetailsRaw = await grist.docApi.fetchTable(config.tables.REVENUE_DETAILS, { Revenue: [rev.id] });
         const revenueDetails = normalizeTableData(revenueDetailsRaw).map(d => ({ ...d.fields, Revenue: newRevenueId, Event: newEventId, id: undefined }));
-        if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
+        if (revenueDetails.length) await addRecords(config.tables.REVENUE_DETAILS, revenueDetails);
       }
-      
-      await grist.docApi.applyUserActions([
-        ['UpdateRecord', config.tables.EVENTS, sourceEventId, { [config.triggerColumn]: false }]
-      ]);
 
-      setUIState('success', `Event '${sourceEvent.fields.Name || 'Unknown'}' duplicated successfully!`);
+      setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully!`);
     } catch (err) {
       console.error('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message}`);
     }
   }
 
-  grist.ready({
-    requiredAccess: 'full',
-    columns: [config.triggerColumn],
-  });
+  grist.ready();
 
-  // --- FINAL FIX: Use onRecords to listen for data changes ---
-  grist.onRecords(function(records) {
-    if (!records) { return; }
-    // onRecords gives us the full record objects that were changed.
-    // We find the one that was just triggered.
-    const triggeredRecord = records.find(r => r[config.triggerColumn]);
-    if (triggeredRecord) {
-      // We found it! Call the duplication logic with the correct ID.
-      duplicateEvent(triggeredRecord.id);
+  // --- FINAL FIX: Use onRecord to know which row is selected ---
+  grist.onRecord(function(record) {
+    if (record) {
+      // We need to fetch the full record to get all fields, as `onRecord` can be partial
+      grist.docApi.fetchTable(config.tables.EVENTS).then(table => {
+        const allEvents = normalizeTableData(table);
+        selectedEvent = allEvents.find(e => e.id === record.id);
+        if (selectedEvent) {
+          setUIState('selection', selectedEvent.fields.Name);
+        } else {
+          setUIState('initial');
+        }
+      });
+    } else {
+      selectedEvent = null;
+      setUIState('initial');
     }
   });
+
+  // Add listener for the new button inside the widget
+  document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
 
 </script>
 </body>
