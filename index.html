@@ -48,23 +48,29 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.3 (Final: JS find for main event, API filter for children)
+   * Version: 6.3 (Final API-based solution with Column ID debug tool)
    */
   const WIDGET_VERSION = "v6.3";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
+
+  // STEP 1: Set to true to find Column IDs in the console
+  const debug = {
+    findColumnIds: true 
+  };
   
+  // STEP 2: Update these IDs with the `colId` output from the debug console
   const config = {
     tables: {
       EVENTS: "Events", EXPENSES: "Expenses", EXPENSE_DETAILS: "ExpenseDetails",
       REVENUES: "Revenues", REVENUE_DETAILS: "RevenueDetails", PERIODS: "Periods",
     },
     columnIds: {
-      EVENT_LINK: "Event",
-      EXPENSE_LINK: "Expense",
-      REVENUE_LINK: "Revenue",
-      BUDGET_VERSION_LINK: "BudgetVersion"
+      EVENT_LINK: "Event", // <-- VERIFY AND UPDATE THIS
+      EXPENSE_LINK: "Expense", // <-- VERIFY AND UPDATE THIS
+      REVENUE_LINK: "Revenue", // <-- VERIFY AND UPDATE THIS
+      BUDGET_VERSION_LINK: "BudgetVersion" // <-- VERIFY AND UPDATE THIS
     }
   };
 
@@ -169,16 +175,32 @@
   }
 
   async function duplicateSelectedEvent() {
+    if (debug.findColumnIds) {
+        setUIState('processing', 'Debug mode: Finding Column IDs...');
+        try {
+            const allTables = await grist.docApi.listTables();
+            console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
+            for (const tableId of allTables) {
+                if (Object.values(config.tables).includes(tableId)) {
+                    const columns = await grist.docApi.listColumns(tableId);
+                    console.log(`\n--- Schema for table '${tableId}' ---`);
+                    console.table(columns.map(c => ({label: c.fields.label, colId: c.fields.colId, type: c.fields.type})));
+                }
+            }
+            setUIState('success', 'Debug complete. Check the console, update the config, then set debug flag to false.');
+        } catch (e) {
+            setUIState('error', 'Debug failed: ' + e.message);
+        }
+        return;
+    }
+
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
     if (!sourceEventId) { setUIState('error', "No event ID selected."); return; }
 
     try {
       setUIState('processing', 'Fetching source event...');
-      // Use robust "fetch all and find" to guarantee the correct event is selected.
-      const allEventsRaw = await grist.docApi.fetchTable(config.tables.EVENTS);
-      const allEvents = normalizeTableData(allEventsRaw);
-      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
-      
+      const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
+      const sourceEvent = normalizeTableData(sourceEventRaw)[0];
       if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
       
       const sourceEventFields = sourceEvent.fields;
@@ -239,7 +261,6 @@
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
   grist.onRecord(record => {
-    console.log('grist.onRecord fired:', record);
     if (record?.id) {
         document.getElementById('start-duplication').dataset.id = record.id;
         setUIState('selection', `[${record.id}] ${record.Name}`);
