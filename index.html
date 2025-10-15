@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v6.8</title>
+  <title>Duplicate Event Widget v6.9</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.8 (Uses grist.onOptions for correct, efficient filtering)
+   * Version: 6.9 (Uses grist.onOptions for correct, efficient filtering)
    */
-  const WIDGET_VERSION = "v6.8";
+  const WIDGET_VERSION = "v6.9";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -136,11 +136,9 @@
       const { parentRecords, childTable, newParentIdMap, childLinkColumnId } = options;
       
       if (parentRecords.length === 0) return;
-
       const oldParentIds = parentRecords.map(p => p.id);
       
       const filter = { [childLinkColumnId]: oldParentIds };
-      console.log(`Fetching ${childTable} with filter:`, JSON.stringify(filter));
       const grandchildrenToCloneRaw = await grist.docApi.fetchTable(childTable, filter);
       const grandchildrenToClone = normalizeData(grandchildrenToCloneRaw);
 
@@ -196,7 +194,6 @@
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
 
-      // Clone Expenses and their Details
       if (activeSelection.expenses.length > 0) {
         setUIState('processing', `Cloning ${activeSelection.expenses.length} Expenses...`);
         const oldExpenseIds = activeSelection.expenses.map(r => r.id);
@@ -215,7 +212,6 @@
         });
       }
 
-      // Clone Revenues and their Details
       if (activeSelection.revenues.length > 0) {
         setUIState('processing', `Cloning ${activeSelection.revenues.length} Revenues...`);
         const oldRevenueIds = activeSelection.revenues.map(r => r.id);
@@ -241,8 +237,9 @@
     }
   }
 
-  // Define the required linked columns. Grist will automatically find the
-  // 'Reference' columns in these tables that point to 'Events'.
+  // CORRECTED: This tells Grist which linked tables we want data from.
+  // Because your schema has Reference columns, Grist handles the linking automatically.
+  // No mapping is needed in the creator panel.
   grist.ready({
     requiredAccess: 'full',
     columns: [
@@ -251,7 +248,6 @@
     ],
   });
 
-  // onRecord gets the main selected Event
   grist.onRecord(record => {
     console.log("onRecord received:", record);
     if (record?.id) {
@@ -266,7 +262,7 @@
     }
   });
 
-  // onOptions gets the PRE-FILTERED child records for us automatically.
+  // This receives the PRE-FILTERED child records from Grist.
   grist.onOptions(options => {
     console.log("onOptions received:", options);
     activeSelection.expenses = options?.linkedExpenses ? normalizeData(options.linkedExpenses) : [];
