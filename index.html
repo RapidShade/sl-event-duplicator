@@ -30,7 +30,7 @@
   <div id="selection-state" class="hidden">
     <h3>Selected Event:</h3>
     <p id="selected-event-name"></p>
-    <button id="start-duplication">Duplicate This Event</button>
+    <button id="start-duplication" data-id="0">Duplicate This Event</button>
   </div>
   <div id="processing-state" class="hidden">
     <div id="loader"></div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 4.0 (Complete redesign to use onRecord reliably)
+   * Version: 4.1 (Fixes stale record bug with data attribute)
    */
-  console.log("RapidShade: Widget version 4.0 (Workflow redesign)");
+  console.log("RapidShade: Widget version 4.1 (Fixes stale record bug)");
 
   const config = {
     tables: {
@@ -66,11 +66,8 @@
   };
 
   let resolvePeriodSelection = null;
-  let selectedEvent = null;
 
-  // --- UI Control Functions ---
   function setUIState(state, message = '') {
-    // Hide all states first
     document.getElementById('initial-state').classList.add('hidden');
     document.getElementById('selection-state').classList.add('hidden');
     document.getElementById('processing-state').classList.add('hidden');
@@ -91,12 +88,10 @@
       const el = document.getElementById('status');
       el.textContent = message;
       el.className = `status-${state}`;
-      // After success or error, go back to the initial state
       document.getElementById('initial-state').classList.remove('hidden');
     }
   }
 
-  // Other helper functions remain the same...
   function normalizeTableData(tableData) {
     if (Array.isArray(tableData)) return tableData;
     const keys = Object.keys(tableData);
@@ -139,7 +134,10 @@
   });
   document.getElementById('cancel-duplication').addEventListener('click', () => {
     if (resolvePeriodSelection) resolvePeriodSelection(null);
-    setUIState('initial');
+    const button = document.getElementById('start-duplication');
+    const selectedEventId = parseInt(button.dataset.id, 10);
+    const selectedEventName = document.getElementById('selected-event-name').textContent;
+    setUIState('selection', selectedEventName);
   });
 
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
@@ -166,20 +164,31 @@
   }
 
   async function duplicateSelectedEvent() {
-    if (!selectedEvent) {
-      setUIState('error', "No event selected.");
+    const button = document.getElementById('start-duplication');
+    const sourceEventId = parseInt(button.dataset.id, 10);
+
+    if (!sourceEventId) {
+      setUIState('error', "No event ID found on button.");
       return;
     }
 
     try {
-      const sourceEventId = selectedEvent.id;
-      const sourceEventFields = selectedEvent.fields;
+      // Fetch the fresh record right now.
+      const eventsTable = await grist.docApi.fetchTable(config.tables.EVENTS);
+      const allEvents = normalizeTableData(eventsTable);
+      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
+
+      if (!sourceEvent) {
+        throw new Error(`Could not find event with ID ${sourceEventId}`);
+      }
+      
+      const sourceEventFields = sourceEvent.fields;
 
       setUIState('processing', 'Loading periods...');
       const periods = await getPeriodsData();
       const targetPeriodId = await promptForPeriod(periods);
       if (!targetPeriodId) { 
-        setUIState('selection', sourceEventFields.Name); // Go back to selection state
+        setUIState('selection', `[${sourceEvent.id}] ${sourceEventFields.Name}`);
         return; 
       }
 
@@ -232,7 +241,6 @@
       const projectedBudgets = normalizeTableData(projectedBudgetsRaw).map(pb => ({ ...pb.fields, Event: newEventId, id: undefined }));
       if (projectedBudgets.length) await addRecords(config.tables.PROJECTED_BUDGETS, projectedBudgets);
 
-      setUIState('processing', 'Cloning expenses...');
       // (Cloning logic for expenses and revenues remains the same)
       const expensesRaw = await grist.docApi.fetchTable(config.tables.EXPENSES, { Event: [sourceEventId] });
       const expenses = normalizeTableData(expensesRaw);
@@ -247,7 +255,6 @@
         if (expenseDetails.length) await addRecords(config.tables.EXPENSE_DETAILS, expenseDetails);
       }
 
-      setUIState('processing', 'Cloning revenues...');
       const revenuesRaw = await grist.docApi.fetchTable(config.tables.REVENUES, { Event: [sourceEventId] });
       const revenues = normalizeTableData(revenuesRaw);
       for (const rev of revenues) {
@@ -270,26 +277,27 @@
 
   grist.ready();
 
-  // --- FINAL FIX: Use onRecord to know which row is selected ---
   grist.onRecord(function(record) {
     if (record) {
-      // We need to fetch the full record to get all fields, as `onRecord` can be partial
+      // We still need to fetch the full record for all fields.
       grist.docApi.fetchTable(config.tables.EVENTS).then(table => {
         const allEvents = normalizeTableData(table);
-        selectedEvent = allEvents.find(e => e.id === record.id);
-        if (selectedEvent) {
-          setUIState('selection', selectedEvent.fields.Name);
+        const currentEvent = allEvents.find(e => e.id === record.id);
+        if (currentEvent) {
+          // Update the button's data-id attribute with the selected record's ID
+          const button = document.getElementById('start-duplication');
+          button.dataset.id = currentEvent.id;
+          // Update the UI with the name and ID
+          setUIState('selection', `[${currentEvent.id}] ${currentEvent.fields.Name}`);
         } else {
           setUIState('initial');
         }
       });
     } else {
-      selectedEvent = null;
       setUIState('initial');
     }
   });
 
-  // Add listener for the new button inside the widget
   document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
 
 </script>
