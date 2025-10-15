@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v6.5</title>
+  <title>Duplicate Event Widget v6.6</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.5 (Final: Uses robust grist.onOptions for filtering)
+   * Version: 6.6 (Uses grist.onOptions for correct, efficient filtering)
    */
-  const WIDGET_VERSION = "v6.5";
+  const WIDGET_VERSION = "v6.6";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -77,15 +77,15 @@
       'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
   ];
 
-  let activeProcess = { 
+  // This global object will store all the data related to the current selection.
+  let activeSelection = { 
+    event: null,
+    expenses: [],
+    revenues: [],
     resolvePeriod: null, 
-    sourceEvent: null,
-    linkedExpenses: [],
-    linkedRevenues: []
   };
 
   function setUIState(state, message = '') {
-    // UI state management code...
     console.log(`Setting UI state to: ${state}`, message);
     ['initial-state', 'selection-state', 'processing-state', 'period-selector-container'].forEach(id => {
         document.getElementById(id).classList.add('hidden');
@@ -107,15 +107,15 @@
     }
   }
 
-  function normalizeSqlData(sqlData) {
-    if (!sqlData || typeof sqlData !== 'object' || !sqlData.id) return [];
-    const keys = Object.keys(sqlData);
-    const numRecords = sqlData.id.length;
+  function normalizeData(tableData) {
+    if (!tableData || typeof tableData !== 'object' || !tableData.id) return [];
+    const keys = Object.keys(tableData);
+    const numRecords = tableData.id.length;
     const records = [];
     for (let i = 0; i < numRecords; i++) {
-      const record = { id: sqlData.id[i], fields: {} };
+      const record = { id: tableData.id[i], fields: {} };
       for (const key of keys) {
-        if (key !== 'id') record.fields[key] = sqlData[key][i];
+        if (key !== 'id') record.fields[key] = tableData[key][i];
       }
       records.push(record);
     }
@@ -133,16 +133,19 @@
       return cleanedData;
   }
 
-  async function cloneRelatedRecords(options) {
-      const { parentRecords, childTable, newParentIdMap, parentLinkColumnId, childLinkColumnId } = options;
+  async function cloneGrandchildren(options) {
+      const { parentRecords, childTable, newParentIdMap, childLinkColumnId } = options;
       
       if (parentRecords.length === 0) return;
 
       const oldParentIds = parentRecords.map(p => p.id);
       
-      const idsPlaceholder = Array(oldParentIds.length).fill('?').join(',');
-      const grandchildrenToCloneRaw = await grist.sql(`SELECT * FROM ${childTable} WHERE ${childLinkColumnId} IN (${idsPlaceholder})`, oldParentIds);
-      const grandchildrenToClone = normalizeSqlData(grandchildrenToCloneRaw);
+      // Use docApi.fetchTable here, as it's the only way to query for grandchildren.
+      // This call is now reliable because we've isolated the issue.
+      const filter = { [childLinkColumnId]: oldParentIds };
+      console.log(`Fetching ${childTable} with filter:`, JSON.stringify(filter));
+      const grandchildrenToCloneRaw = await grist.docApi.fetchTable(childTable, filter);
+      const grandchildrenToClone = normalizeData(grandchildrenToCloneRaw);
 
       if (grandchildrenToClone.length === 0) return;
       setUIState('processing', `Cloning ${grandchildrenToClone.length} ${childTable} records...`);
@@ -159,19 +162,19 @@
   }
 
   async function duplicateSelectedEvent() {
-    if (!activeProcess.sourceEvent) { setUIState('error', "No event selected."); return; }
+    if (!activeSelection.event) { setUIState('error', "No event selected. Please select an event to duplicate."); return; }
     
-    const sourceEvent = activeProcess.sourceEvent;
+    const sourceEvent = activeSelection.event;
 
     try {
       setUIState('processing', 'Loading periods...');
-      const periodsRaw = await grist.sql(`SELECT id, Name FROM Periods`);
-      const periods = normalizeSqlData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
+      const periodsRaw = await grist.docApi.fetchTable(config.tables.PERIODS);
+      const periods = normalizeData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
       if (periods.length === 0) throw new Error('No Periods found to select from.');
       
       populateSelector('period-select', periods);
       setUIState('selectingPeriod');
-      const targetPeriodId = await new Promise(resolve => { activeProcess.resolvePeriod = resolve; });
+      const targetPeriodId = await new Promise(resolve => { activeSelection.resolvePeriod = resolve; });
 
       if (!targetPeriodId) { cancelProcess(); return; } 
 
@@ -196,11 +199,11 @@
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
 
-      // Clone Expenses
-      if (activeProcess.linkedExpenses.length > 0) {
-        setUIState('processing', `Cloning ${activeProcess.linkedExpenses.length} Expenses...`);
-        const oldExpenseIds = activeProcess.linkedExpenses.map(r => r.id);
-        const newExpenseData = activeProcess.linkedExpenses.map(r => {
+      // Clone Expenses and their Details
+      if (activeSelection.expenses.length > 0) {
+        setUIState('processing', `Cloning ${activeSelection.expenses.length} Expenses...`);
+        const oldExpenseIds = activeSelection.expenses.map(r => r.id);
+        const newExpenseData = activeSelection.expenses.map(r => {
             const data = cleanRecordData(r.fields);
             data[config.columnIds.EVENT_LINK] = newEventId;
             return data;
@@ -208,19 +211,18 @@
         const newExpenseIds = await addRecords(config.tables.EXPENSES, newExpenseData);
         const newExpenseIdMap = new Map(oldExpenseIds.map((oldId, i) => [oldId, newExpenseIds[i]]));
 
-        await cloneRelatedRecords({
-            parentRecords: activeProcess.linkedExpenses, childTable: config.tables.EXPENSE_DETAILS,
+        await cloneGrandchildren({
+            parentRecords: activeSelection.expenses, childTable: config.tables.EXPENSE_DETAILS,
             newParentIdMap: newExpenseIdMap,
-            parentLinkColumnId: config.columnIds.EVENT_LINK,
             childLinkColumnId: config.columnIds.EXPENSE_LINK,
         });
       }
 
-      // Clone Revenues
-      if (activeProcess.linkedRevenues.length > 0) {
-        setUIState('processing', `Cloning ${activeProcess.linkedRevenues.length} Revenues...`);
-        const oldRevenueIds = activeProcess.linkedRevenues.map(r => r.id);
-        const newRevenueData = activeProcess.linkedRevenues.map(r => {
+      // Clone Revenues and their Details
+      if (activeSelection.revenues.length > 0) {
+        setUIState('processing', `Cloning ${activeSelection.revenues.length} Revenues...`);
+        const oldRevenueIds = activeSelection.revenues.map(r => r.id);
+        const newRevenueData = activeSelection.revenues.map(r => {
             const data = cleanRecordData(r.fields);
             data[config.columnIds.EVENT_LINK] = newEventId;
             return data;
@@ -228,10 +230,9 @@
         const newRevenueIds = await addRecords(config.tables.REVENUES, newRevenueData);
         const newRevenueIdMap = new Map(oldRevenueIds.map((oldId, i) => [oldId, newRevenueIds[i]]));
         
-        await cloneRelatedRecords({
-            parentRecords: activeProcess.linkedRevenues, childTable: config.tables.REVENUE_DETAILS,
+        await cloneGrandchildren({
+            parentRecords: activeSelection.revenues, childTable: config.tables.REVENUE_DETAILS,
             newParentIdMap: newRevenueIdMap,
-            parentLinkColumnId: config.columnIds.EVENT_LINK,
             childLinkColumnId: config.columnIds.REVENUE_LINK,
         });
       }
@@ -243,32 +244,35 @@
     }
   }
 
+  // Define the required linked columns for grist.onOptions
   grist.ready({
     requiredAccess: 'full',
     columns: [
-      { name: "Expenses", table: config.tables.EXPENSES, optional: true },
-      { name: "Revenues", table: config.tables.REVENUES, optional: true }
+      { name: "linkedExpenses", table: config.tables.EXPENSES },
+      { name: "linkedRevenues", table: config.tables.REVENUES }
     ],
   });
 
-  // Use grist.onRecord and grist.onOptions to react to selections
+  // onRecord gets the main selected Event
   grist.onRecord(record => {
+    console.log("onRecord received:", record);
     if (record?.id) {
-        activeProcess.sourceEvent = {id: record.id, fields: record};
-        setUIState('selection', `[${record.id}] ${record.Name}`);
+        activeSelection.event = {id: record.id, fields: record};
+        const eventName = record.Name || 'Event without a name';
+        setUIState('selection', `[${record.id}] ${eventName}`);
     } else {
-      activeProcess.sourceEvent = null;
+      activeSelection.event = null;
+      activeSelection.expenses = [];
+      activeSelection.revenues = [];
       setUIState('initial');
     }
   });
 
+  // onOptions gets the PRE-FILTERED child records for us automatically.
   grist.onOptions(options => {
-    if (options?.Expenses) {
-        activeProcess.linkedExpenses = normalizeSqlData(options.Expenses);
-    }
-    if (options?.Revenues) {
-        activeProcess.linkedRevenues = normalizeSqlData(options.Revenues);
-    }
+    console.log("onOptions received:", options);
+    activeSelection.expenses = options?.linkedExpenses ? normalizeData(options.linkedExpenses) : [];
+    activeSelection.revenues = options?.linkedRevenues ? normalizeData(options.linkedRevenues) : [];
   });
 
   document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
@@ -291,11 +295,11 @@
     } catch (e) { return sourceDate; }
   }
   function cancelProcess() {
-    if (activeProcess.resolvePeriod) activeProcess.resolvePeriod(null);
-    setUIState('selection', `[${activeProcess.sourceEvent.id}] ${activeProcess.sourceEvent.fields.Name}`);
+    if (activeSelection.resolvePeriod) activeSelection.resolvePeriod(null);
+    setUIState('selection', `[${activeSelection.event.id}] ${activeSelection.event.fields.Name}`);
   }
   document.getElementById('confirm-duplication').addEventListener('click', () => {
-    if (activeProcess.resolvePeriod) activeProcess.resolvePeriod(parseInt(document.getElementById('period-select').value, 10));
+    if (activeSelection.resolvePeriod) activeSelection.resolvePeriod(parseInt(document.getElementById('period-select').value, 10));
   });
   document.getElementById('cancel-duplication').addEventListener('click', cancelProcess);
   function populateSelector(selectId, options) {
