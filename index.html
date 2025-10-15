@@ -17,6 +17,7 @@
     .status-success { color: green; }
     .status-error   { color: red; }
     .status-info    { color: #555; }
+    h2#widget-title { font-size: 1.2em; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
@@ -81,6 +82,7 @@
     if (state === 'initial') {
       document.getElementById('initial-state').classList.remove('hidden');
     } else if (state === 'selection') {
+      document.getElementById('initial-state').classList.remove('hidden'); // Keep title visible
       document.getElementById('selection-state').classList.remove('hidden');
       document.getElementById('selected-event-name').textContent = message;
     } else if (state === 'processing') {
@@ -99,7 +101,7 @@
   function normalizeTableData(tableData) {
     if (Array.isArray(tableData)) return tableData;
     const keys = Object.keys(tableData);
-    if (keys.indexOf('id') === -1) throw new Error("Table data is missing 'id' column.");
+    if (keys.indexOf('id') === -1) return []; // Return empty array if no ID column
     const numRecords = tableData.id.length;
     const records = [];
     for (let i = 0; i < numRecords; i++) {
@@ -149,10 +151,7 @@
       if (isNaN(date.getTime())) return sourceDate;
       date.setFullYear(targetPeriodYear);
       return date.toISOString().split('T')[0];
-    } catch (e) {
-      console.log("RapidShade: Error adjusting date:", e);
-      return sourceDate;
-    }
+    } catch (e) { return sourceDate; }
   }
 
   async function addRecords(tableName, records) {
@@ -179,9 +178,7 @@
       const allEvents = normalizeTableData(eventsTable);
       const sourceEvent = allEvents.find(e => e.id === sourceEventId);
 
-      if (!sourceEvent) {
-        throw new Error(`Could not find event with ID ${sourceEventId}`);
-      }
+      if (!sourceEvent) { throw new Error(`Could not find event with ID ${sourceEventId}`); }
       
       const sourceEventFields = sourceEvent.fields;
 
@@ -205,12 +202,7 @@
       const newEventData = { ...sourceEventFields };
       delete newEventData.id;
 
-      const formulaColumns = [
-        'DisplayStyle', 'EventCode', 'Duplicate_Trigger',
-        'total_budgeted_expense', 'total_actual_expense', 'expense_diff', 'expense_diff_percent',
-        'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff', 'revenue_diff_percent',
-        'projected_budget', 'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3'
-      ];
+      const formulaColumns = ['DisplayStyle', 'EventCode', 'Duplicate_Trigger', 'total_budgeted_expense', 'total_actual_expense', 'expense_diff', 'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff', 'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3'];
       Object.keys(newEventData).forEach(key => {
         if (key.startsWith('gristHelper_') || formulaColumns.includes(key)) {
           delete newEventData[key];
@@ -227,7 +219,6 @@
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
-      /*
       setUIState('processing', 'Cloning budget version...');
       const versionsRaw = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
       const versions = normalizeTableData(versionsRaw);
@@ -237,7 +228,6 @@
           delete newVersionData.id;
           await addRecords(config.tables.PERIOD_BUDGET_VERSIONS, [newVersionData]);
       }
-      */
       
       setUIState('processing', 'Cloning projected budgets...');
       const projectedBudgetsRaw = await grist.docApi.fetchTable(config.tables.PROJECTED_BUDGETS, { Event: [sourceEventId] });
@@ -285,8 +275,9 @@
   grist.onRecord(function(record) {
     if (initialLoad) {
       initialLoad = false;
-      setUIState('initial');
-      return;
+      // If the first record Grist sends on load is not null, we ignore it.
+      // We'll wait for the user to explicitly click a row.
+      if (record) { return; }
     }
     if (record && record.id) {
         const button = document.getElementById('start-duplication');
