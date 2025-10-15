@@ -24,7 +24,7 @@
 
 <div id="widget-container">
   <div id="initial-state">
-    <h2>Duplicate Event Widget</h2>
+    <h2 id="widget-title">Duplicate Event Widget</h2>
     <p>Select an event in the table to begin.</p>
   </div>
   <div id="selection-state" class="hidden">
@@ -48,9 +48,12 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 4.3 (Final robust UI and workflow fix)
+   * Version: 4.4 (Adds visible version number and final UI fixes)
    */
-  console.log("RapidShade: Widget version 4.3 (Final robust UI and workflow fix)");
+  const WIDGET_VERSION = "v4.4";
+  console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
+  document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
+
 
   const config = {
     tables: {
@@ -135,7 +138,6 @@
   });
   document.getElementById('cancel-duplication').addEventListener('click', () => {
     if (resolvePeriodSelection) resolvePeriodSelection(null);
-    const button = document.getElementById('start-duplication');
     const selectedEventName = document.getElementById('selected-event-name').textContent;
     setUIState('selection', selectedEventName);
   });
@@ -281,11 +283,8 @@
   });
 
   grist.onRecord(function(record) {
-    // This flag prevents the widget from reacting to the initial automatic call on load.
     if (initialLoad) {
       initialLoad = false;
-      // On the very first load, the record might be the top-of-table record.
-      // We want to ignore this and start fresh.
       setUIState('initial');
       return;
     }
