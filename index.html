@@ -48,7 +48,7 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.2 (Fixes API filter by using correct Column ID, includes debug tool)
+   * Version: 6.2 (Uses correct Column IDs for API filtering, includes debug tool)
    */
   const WIDGET_VERSION = "v6.2";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
@@ -178,13 +178,17 @@
     if (debug.findColumnIds) {
         setUIState('processing', 'Debug mode: Finding Column IDs...');
         try {
-            const tables = await grist.docApi.getTables();
+            // Note: grist.docApi.getTables() does not exist in the public API.
+            // We fetch the first record of each table to inspect its column IDs.
             console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
-            for (const table of tables) {
-                if ([config.tables.EXPENSES, config.tables.REVENUES, config.tables.EXPENSE_DETAILS, config.tables.REVENUE_DETAILS].includes(table.id)) {
-                    const columns = await grist.docApi.getColumns(table.id);
-                    console.log(`\n--- Schema for table '${table.id}' ---`);
-                    console.table(columns.map(c => ({label: c.label, colId: c.id, type: c.type})));
+            for (const tableId of Object.values(config.tables)) {
+                const recordRaw = await grist.docApi.fetchTable(tableId);
+                const record = normalizeTableData(recordRaw)[0];
+                if (record) {
+                    console.log(`\n--- Column IDs for table '${tableId}' ---`);
+                    console.table(Object.keys(record.fields).map(id => ({ colId: id })));
+                } else {
+                    console.log(`Table '${tableId}' is empty or could not be read.`);
                 }
             }
             setUIState('success', 'Debug complete. Check the console for Column IDs, update the config, then set debug flag to false.');
