@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v6.1</title>
+  <title>Duplicate Event Widget v6.2</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,16 +48,16 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.1 (Fixes API filter by using correct Column ID, includes debug tool)
+   * Version: 6.2 (Fixes API filter by using correct Column ID, includes debug tool)
    */
-  const WIDGET_VERSION = "v6.1";
+  const WIDGET_VERSION = "v6.2";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
 
-  // STEP 1: Set to true to find Column IDs
+  // STEP 1: Set to true to find Column IDs in the console
   const debug = {
-    findColumnIds: false 
+    findColumnIds: true 
   };
   
   // STEP 2: Update these IDs with the output from the debug console
@@ -67,14 +67,10 @@
       REVENUES: "Revenues", REVENUE_DETAILS: "RevenueDetails", PERIODS: "Periods",
     },
     columnIds: {
-      // The Column ID in 'Expenses' & 'Revenues' that links to the 'Events' table.
-      EVENT_LINK: "Event",
-      // The Column ID in 'ExpenseDetails' that links to the 'Expenses' table.
-      EXPENSE_LINK: "Expense",
-      // The Column ID in 'RevenueDetails' that links to the 'Revenues' table.
-      REVENUE_LINK: "Revenue",
-       // The Column ID in 'Events' that links to 'PeriodBudgetVersions'
-      BUDGET_VERSION_LINK: "BudgetVersion"
+      EVENT_LINK: "Event", // <-- VERIFY AND UPDATE THIS
+      EXPENSE_LINK: "Expense", // <-- VERIFY AND UPDATE THIS
+      REVENUE_LINK: "Revenue", // <-- VERIFY AND UPDATE THIS
+      BUDGET_VERSION_LINK: "BudgetVersion" // <-- VERIFY AND UPDATE THIS
     }
   };
 
@@ -83,8 +79,8 @@
       'Duplicate_Trigger', 'total_budgeted_expense', 'total_actual_expense', 'expense_diff', 
       'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff', 
       'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2', 
-      'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance', 'ExpCode', 'RevCode', 
-      'Actual', 'Budget', 'Projected', 'ESID'
+      'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance', 
+      'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
   ];
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
@@ -181,21 +177,17 @@
   async function duplicateSelectedEvent() {
     if (debug.findColumnIds) {
         setUIState('processing', 'Debug mode: Finding Column IDs...');
-        console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
         try {
-            const expenseRecord = normalizeTableData(await grist.docApi.fetchTable(config.tables.EXPENSES))[0];
-            if (expenseRecord) {
-                console.log(`Column IDs for '${config.tables.EXPENSES}':`, Object.keys(expenseRecord.fields));
-            } else {
-                console.log(`Table '${config.tables.EXPENSES}' is empty or could not be read.`);
+            const tables = await grist.docApi.getTables();
+            console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
+            for (const table of tables) {
+                if ([config.tables.EXPENSES, config.tables.REVENUES, config.tables.EXPENSE_DETAILS, config.tables.REVENUE_DETAILS].includes(table.id)) {
+                    const columns = await grist.docApi.getColumns(table.id);
+                    console.log(`\n--- Schema for table '${table.id}' ---`);
+                    console.table(columns.map(c => ({label: c.label, colId: c.id, type: c.type})));
+                }
             }
-            const revenueRecord = normalizeTableData(await grist.docApi.fetchTable(config.tables.REVENUES))[0];
-            if (revenueRecord) {
-                console.log(`Column IDs for '${config.tables.REVENUES}':`, Object.keys(revenueRecord.fields));
-            } else {
-                 console.log(`Table '${config.tables.REVENUES}' is empty or could not be read.`);
-            }
-            setUIState('success', 'Debug complete. Check the console for Column IDs, then set debug flag to false.');
+            setUIState('success', 'Debug complete. Check the console for Column IDs, update the config, then set debug flag to false.');
         } catch (e) {
             setUIState('error', 'Debug failed: ' + e.message);
         }
@@ -203,10 +195,7 @@
     }
 
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
-    if (!sourceEventId) {
-      setUIState('error', "No event ID selected.");
-      return;
-    }
+    if (!sourceEventId) { setUIState('error', "No event ID selected."); return; }
 
     try {
       setUIState('processing', 'Fetching source event...');
@@ -249,19 +238,15 @@
       const newEventId = newEventIds[0];
       
       await cloneRelatedRecords({
-          parentTable: config.tables.EXPENSES,
-          childTable: config.tables.EXPENSE_DETAILS,
-          sourceParentId: sourceEventId,
-          newParentId: newEventId,
+          parentTable: config.tables.EXPENSES, childTable: config.tables.EXPENSE_DETAILS,
+          sourceParentId: sourceEventId, newParentId: newEventId,
           parentLinkColumnId: config.columnIds.EVENT_LINK,
           childLinkColumnId: config.columnIds.EXPENSE_LINK
       });
 
       await cloneRelatedRecords({
-          parentTable: config.tables.REVENUES,
-          childTable: config.tables.REVENUE_DETAILS,
-          sourceParentId: sourceEventId,
-          newParentId: newEventId,
+          parentTable: config.tables.REVENUES, childTable: config.tables.REVENUE_DETAILS,
+          sourceParentId: sourceEventId, newParentId: newEventId,
           parentLinkColumnId: config.columnIds.EVENT_LINK,
           childLinkColumnId: config.columnIds.REVENUE_LINK
       });
@@ -299,7 +284,7 @@
     if (!sourceDate || !targetPeriodYear) return sourceDate;
     try {
       const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
-      if (isNaN(date.getTime())) return sourceDate;
+      if (isNaN(date.getTime())) return date;
       date.setFullYear(targetPeriodYear);
       return date.getTime() / 1000;
     } catch (e) { return sourceDate; }
