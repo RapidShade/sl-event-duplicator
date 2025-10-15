@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v7.0</title>
+  <title>Duplicate Event Widget v7.1</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 7.0 (Corrects grist.ready() config and fixes 'date' typo)
+   * Version: 7.1 (Corrects grist.ready() config to receive full record, fixes typo)
    */
-  const WIDGET_VERSION = "v7.0";
+  const WIDGET_VERSION = "v7.1";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -238,12 +238,13 @@
     }
   }
 
-  // FIX 1: Correctly configure grist.ready() to get BOTH the main table for onRecord
-  // AND the linked-by tables for onOptions.
+  // FIX 1: This is the correct configuration.
+  // 'table' links the widget to the Events table for onRecord to receive the FULL row.
+  // 'mappings' tells Grist to also send linked data from other tables to onOptions.
   grist.ready({
     requiredAccess: 'full',
     table: config.tables.EVENTS,
-    columns: [
+    mappings: [
       { name: "linkedExpenses", table: config.tables.EXPENSES },
       { name: "linkedRevenues", table: config.tables.REVENUES }
     ],
@@ -280,7 +281,7 @@
     return (results?.retValues || []).map(r => r?.id || r);
   }
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
-    // FIX 2: Corrected typo from 'date' to 'sourceDate'
+    // FIX 2: Corrected typo from `return date` to `return sourceDate`
     if (!sourceDate || !targetPeriodYear) return sourceDate;
     try {
       const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
