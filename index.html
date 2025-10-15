@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v6.0</title>
+  <title>Duplicate Event Widget v6.1</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -22,7 +22,6 @@
   </style>
 </head>
 <body>
-
 <div id="widget-container">
   <h2 id="widget-title">Duplicate Event Widget</h2>
   <div id="initial-state" class="selector-container">
@@ -49,43 +48,46 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.0 (Uses robust JavaScript filtering to guarantee correctness)
+   * Version: 6.1 (Fixes API filter by using correct Column ID, includes debug tool)
    */
-  const WIDGET_VERSION = "v6.0";
+  const WIDGET_VERSION = "v6.1";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
 
+  // STEP 1: Set to true to find Column IDs
+  const debug = {
+    findColumnIds: false 
+  };
+  
+  // STEP 2: Update these IDs with the output from the debug console
   const config = {
     tables: {
-      EVENTS:                 "Events",
-      PERIODS:                "Periods",
-      EXPENSES:               "Expenses",
-      EXPENSE_DETAILS:        "ExpenseDetails",
-      REVENUES:               "Revenues",
-      REVENUE_DETAILS:        "RevenueDetails",
+      EVENTS: "Events", EXPENSES: "Expenses", EXPENSE_DETAILS: "ExpenseDetails",
+      REVENUES: "Revenues", REVENUE_DETAILS: "RevenueDetails", PERIODS: "Periods",
     },
-    columnNames: {
-      BUDGET_VERSION_LINK: "BudgetVersion",
+    columnIds: {
+      // The Column ID in 'Expenses' & 'Revenues' that links to the 'Events' table.
       EVENT_LINK: "Event",
+      // The Column ID in 'ExpenseDetails' that links to the 'Expenses' table.
       EXPENSE_LINK: "Expense",
-      REVENUE_LINK: "Revenue"
+      // The Column ID in 'RevenueDetails' that links to the 'Revenues' table.
+      REVENUE_LINK: "Revenue",
+       // The Column ID in 'Events' that links to 'PeriodBudgetVersions'
+      BUDGET_VERSION_LINK: "BudgetVersion"
     }
   };
 
   const FORMULA_AND_SYSTEM_COLUMNS_TO_EXCLUDE = [
-      'CreatedAt', 'UpdatedAt', 'CreatedBy', 'UpdatedBy', 'DisplayStyle', 
-      'EventCode', 'Duplicate_Trigger', 'total_budgeted_expense', 'total_actual_expense', 
-      'expense_diff', 'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 
-      'revenue_diff', 'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 
-      'Target2', 'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance', 
-      'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
+      'CreatedAt', 'UpdatedAt', 'CreatedBy', 'UpdatedBy', 'DisplayStyle', 'EventCode', 
+      'Duplicate_Trigger', 'total_budgeted_expense', 'total_actual_expense', 'expense_diff', 
+      'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff', 
+      'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2', 
+      'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance', 'ExpCode', 'RevCode', 
+      'Actual', 'Budget', 'Projected', 'ESID'
   ];
 
-  let activeProcess = {
-    resolvePeriod: null,
-    sourceEventName: ''
-  };
+  let activeProcess = { resolvePeriod: null, sourceEventName: '' };
 
   function setUIState(state, message = '') {
     console.log(`Setting UI state to: ${state}`, message);
@@ -112,7 +114,6 @@
 
   function normalizeTableData(tableData) {
     if (!tableData || typeof tableData !== 'object' || !tableData.id) return [];
-    if (Array.isArray(tableData)) return tableData;
     const keys = Object.keys(tableData);
     const numRecords = tableData.id.length;
     const records = [];
@@ -137,16 +138,12 @@
       return cleanedData;
   }
 
-  /**
-   * FIX: This function now fetches the ENTIRE table and filters using JavaScript.
-   * This is a robust fix for the API filter not working as expected.
-   */
   async function cloneRelatedRecords(options) {
-      const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumn, childLinkColumn } = options;
+      const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumnId, childLinkColumnId } = options;
       
-      const allChildrenRaw = await grist.docApi.fetchTable(parentTable);
-      const allChildren = normalizeTableData(allChildrenRaw);
-      const childrenToClone = allChildren.filter(c => c.fields[parentLinkColumn] === sourceParentId);
+      const filter = { [parentLinkColumnId]: [sourceParentId] };
+      const childrenToCloneRaw = await grist.docApi.fetchTable(parentTable, filter);
+      const childrenToClone = normalizeTableData(childrenToCloneRaw);
 
       if (childrenToClone.length === 0) return;
       setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
@@ -154,27 +151,27 @@
       const oldChildIds = childrenToClone.map(c => c.id);
       const newChildrenData = childrenToClone.map(c => {
           const data = cleanRecordData(c.fields); 
-          data[parentLinkColumn] = newParentId;
+          data[parentLinkColumnId] = newParentId;
           return data;
       });
 
       const newChildIds = await addRecords(parentTable, newChildrenData);
       
-      if (!childTable || !childLinkColumn || newChildIds.length === 0) return;
+      if (!childTable || !childLinkColumnId || newChildIds.length === 0) return;
       const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
       
-      const allGrandchildrenRaw = await grist.docApi.fetchTable(childTable);
-      const allGrandchildren = normalizeTableData(allGrandchildrenRaw);
-      const grandchildrenToClone = allGrandchildren.filter(gc => oldChildIds.includes(gc.fields[childLinkColumn]));
+      const grandchildrenFilter = { [childLinkColumnId]: oldChildIds };
+      const grandchildrenToCloneRaw = await grist.docApi.fetchTable(childTable, grandchildrenFilter);
+      const grandchildrenToClone = normalizeTableData(grandchildrenToCloneRaw);
 
       if (grandchildrenToClone.length === 0) return;
       setUIState('processing', `Cloning ${grandchildrenToClone.length} ${childTable} records...`);
       
       const newGrandchildrenData = grandchildrenToClone.map(gc => {
-          const newParentChildId = oldToNewChildIdMap.get(gc.fields[childLinkColumn]);
+          const newParentChildId = oldToNewChildIdMap.get(gc.fields[childLinkColumnId]);
           if (!newParentChildId) return null;
           const data = cleanRecordData(gc.fields); 
-          data[childLinkColumn] = newParentChildId;
+          data[childLinkColumnId] = newParentChildId;
           return data;
       }).filter(Boolean);
       
@@ -182,33 +179,47 @@
   }
 
   async function duplicateSelectedEvent() {
+    if (debug.findColumnIds) {
+        setUIState('processing', 'Debug mode: Finding Column IDs...');
+        console.log('--- DEBUG MODE: FINDING COLUMN IDs ---');
+        try {
+            const expenseRecord = normalizeTableData(await grist.docApi.fetchTable(config.tables.EXPENSES))[0];
+            if (expenseRecord) {
+                console.log(`Column IDs for '${config.tables.EXPENSES}':`, Object.keys(expenseRecord.fields));
+            } else {
+                console.log(`Table '${config.tables.EXPENSES}' is empty or could not be read.`);
+            }
+            const revenueRecord = normalizeTableData(await grist.docApi.fetchTable(config.tables.REVENUES))[0];
+            if (revenueRecord) {
+                console.log(`Column IDs for '${config.tables.REVENUES}':`, Object.keys(revenueRecord.fields));
+            } else {
+                 console.log(`Table '${config.tables.REVENUES}' is empty or could not be read.`);
+            }
+            setUIState('success', 'Debug complete. Check the console for Column IDs, then set debug flag to false.');
+        } catch (e) {
+            setUIState('error', 'Debug failed: ' + e.message);
+        }
+        return;
+    }
+
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
     if (!sourceEventId) {
-      setUIState('error', "No event ID found. Please re-select the event.");
+      setUIState('error', "No event ID selected.");
       return;
     }
 
     try {
       setUIState('processing', 'Fetching source event...');
-      // FIX: Fetch ALL events and find the correct one to ensure accuracy.
-      const allEventsRaw = await grist.docApi.fetchTable(config.tables.EVENTS);
-      const allEvents = normalizeTableData(allEventsRaw);
-      const sourceEvent = allEvents.find(e => e.id === sourceEventId);
-      
-      if (!sourceEvent) {
-        throw new Error(`Could not find event with ID ${sourceEventId}. It may have been deleted.`);
-      }
+      const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
+      const sourceEvent = normalizeTableData(sourceEventRaw)[0];
+      if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
       
       const sourceEventFields = sourceEvent.fields;
 
       setUIState('processing', 'Loading periods...');
       const periodsRaw = await grist.docApi.fetchTable(config.tables.PERIODS);
       const periods = normalizeTableData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
-      
-      if (periods.length === 0) {
-        setUIState('error', 'No Periods found to select from.');
-        return;
-      }
+      if (periods.length === 0) throw new Error('No Periods found to select from.');
       
       populateSelector('period-select', periods);
       setUIState('selectingPeriod');
@@ -218,7 +229,7 @@
 
       const targetPeriod = periods.find(p => p.id === targetPeriodId);
       let targetYear = new Date().getFullYear();
-      if (targetPeriod && targetPeriod.text) {
+      if (targetPeriod?.text) {
         const yearMatch = targetPeriod.text.match(/(\d{4})/);
         if (yearMatch) targetYear = parseInt(yearMatch[1], 10);
       }
@@ -228,7 +239,7 @@
       
       newEventData.Name = `COPY OF ${sourceEventFields.Name || 'Event'}`;
       newEventData.Period = targetPeriodId;
-      newEventData[config.columnNames.BUDGET_VERSION_LINK] = sourceEventFields[config.columnNames.BUDGET_VERSION_LINK];
+      newEventData[config.columnIds.BUDGET_VERSION_LINK] = sourceEventFields[config.columnIds.BUDGET_VERSION_LINK];
       newEventData.EventStatus = 1;
       newEventData.Notes = null;
       newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
@@ -242,8 +253,8 @@
           childTable: config.tables.EXPENSE_DETAILS,
           sourceParentId: sourceEventId,
           newParentId: newEventId,
-          parentLinkColumn: config.columnNames.EVENT_LINK,
-          childLinkColumn: config.columnNames.EXPENSE_LINK
+          parentLinkColumnId: config.columnIds.EVENT_LINK,
+          childLinkColumnId: config.columnIds.EXPENSE_LINK
       });
 
       await cloneRelatedRecords({
@@ -251,8 +262,8 @@
           childTable: config.tables.REVENUE_DETAILS,
           sourceParentId: sourceEventId,
           newParentId: newEventId,
-          parentLinkColumn: config.columnNames.EVENT_LINK,
-          childLinkColumn: config.columnNames.REVENUE_LINK
+          parentLinkColumnId: config.columnIds.EVENT_LINK,
+          childLinkColumnId: config.columnIds.REVENUE_LINK
       });
 
       setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully!`);
@@ -264,9 +275,9 @@
 
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
-  grist.onRecord(function(record) {
+  grist.onRecord(record => {
     console.log('grist.onRecord fired:', record);
-    if (record && record.id) {
+    if (record?.id) {
         document.getElementById('start-duplication').dataset.id = record.id;
         setUIState('selection', `[${record.id}] ${record.Name}`);
     } else {
@@ -276,9 +287,9 @@
 
   document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
   
-  // --- Helper functions ---
+  // --- Helper Functions ---
   async function addRecords(tableName, records) {
-    if (!records || records.length === 0) return [];
+    if (!records?.length) return [];
     console.log(`Adding ${records.length} records to ${tableName}`);
     const actions = records.map(record => ['AddRecord', tableName, null, record]);
     const results = await grist.docApi.applyUserActions(actions);
