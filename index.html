@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v5.6</title>
+  <title>Duplicate Event Widget v5.7</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -49,9 +49,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 5.6 (Corrects typo for 'Viariance' formula column)
+   * Version: 5.7 (Corrects typo for 'Variance' formula column)
    */
-  const WIDGET_VERSION = "v5.6";
+  const WIDGET_VERSION = "v5.7";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -75,7 +75,7 @@
   };
 
   /**
-   * FIX: Corrected typo for 'Viariance' based on the new error log.
+   * FIX: Corrected 'Viariance' back to 'Variance' based on the new error log.
    */
   const FORMULA_COLUMNS_TO_EXCLUDE = [
       // Events Table
@@ -85,7 +85,7 @@
       'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3',
       
       // Expenses & Revenues Tables (Parent/Summary Tables)
-      'Viariance', // Corrected typo from 'Variance'
+      'Variance', // Corrected from 'Viariance'
       'ExpCode',
       'RevCode',
       'Actual',   
