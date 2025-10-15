@@ -48,7 +48,7 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 6.9 (Uses grist.onOptions for correct, efficient filtering)
+   * Version: 6.9 (Uses grist.onOptions for filtering, fixes 'date' typo)
    */
   const WIDGET_VERSION = "v6.9";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
@@ -237,9 +237,6 @@
     }
   }
 
-  // CORRECTED: This tells Grist which linked tables we want data from.
-  // Because your schema has Reference columns, Grist handles the linking automatically.
-  // No mapping is needed in the creator panel.
   grist.ready({
     requiredAccess: 'full',
     columns: [
@@ -262,7 +259,6 @@
     }
   });
 
-  // This receives the PRE-FILTERED child records from Grist.
   grist.onOptions(options => {
     console.log("onOptions received:", options);
     activeSelection.expenses = options?.linkedExpenses ? normalizeData(options.linkedExpenses) : [];
@@ -280,7 +276,8 @@
     return (results?.retValues || []).map(r => r?.id || r);
   }
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
-    if (!sourceDate || !targetPeriodYear) return date;
+    // FIX: Corrected typo from 'date' to 'sourceDate'
+    if (!sourceDate || !targetPeriodYear) return sourceDate;
     try {
       const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
       if (isNaN(date.getTime())) return sourceDate;
