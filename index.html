@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v5.2</title>
+  <title>Duplicate Event Widget v5.3</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -40,14 +40,8 @@
   <div id="period-selector-container" class="selector-container hidden">
     <label for="period-select">Select Target Period:</label><br>
     <select id="period-select"></select><br>
-    <button id="confirm-period">Next</button>
-    <button class="cancel-button" id="cancel-process-1">Cancel</button>
-  </div>
-  <div id="budget-version-selector-container" class="selector-container hidden">
-    <label for="budget-version-select">Select Budget Version:</label><br>
-    <select id="budget-version-select"></select><br>
     <button id="confirm-duplication">Confirm & Duplicate</button>
-    <button class="cancel-button" id="cancel-process-2">Cancel</button>
+    <button class="cancel-button" id="cancel-duplication">Cancel</button>
   </div>
   <div id="status"></div>
 </div>
@@ -55,18 +49,17 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 5.2 (Uses correct schemas, fixes logic, and clarifies root cause)
+   * Version: 5.3 (Removes Budget Version selection step)
    */
-  const WIDGET_VERSION = "v5.2";
+  const WIDGET_VERSION = "v5.3";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
 
   /****************************************************************************
-   * ACTION REQUIRED: CONFIGURATION
-   * Based on your schemas. Please verify the BUDGET_VERSION_LINK.
-   * You MUST add a column to your 'Events' table that is a 
-   * Reference to 'PeriodBudgetVersions' for this to work.
+   * CONFIGURATION
+   * This still requires the column names to be correct, especially
+   * BUDGET_VERSION_LINK, which is now copied from the source event.
    ****************************************************************************/
   const config = {
     tables: {
@@ -79,22 +72,17 @@
       PERIOD_BUDGET_VERSIONS: "PeriodBudgetVersions",
     },
     columnNames: {
-      // The column in 'Events' that links to 'PeriodBudgetVersions'.
-      // YOU MUST CREATE THIS COLUMN in your 'Events' table.
+      // Column in 'Events' linking to 'PeriodBudgetVersions'
       BUDGET_VERSION_LINK: "BudgetVersion",
-      
-      // Column in Expenses, Revenues, ExpenseDetails, RevenueDetails linking to Events
+      // Column in child tables linking to Events
       EVENT_LINK: "Event",
-      
       // Column in ExpenseDetails linking to Expenses
       EXPENSE_LINK: "Expense",
-      
       // Column in RevenueDetails linking to Revenues
       REVENUE_LINK: "Revenue"
     }
   };
 
-  // List of formula/helper columns to exclude from duplication.
   const FORMULA_COLUMNS_TO_EXCLUDE = [
       'DisplayStyle', 'EventCode', 'Duplicate_Trigger', 'total_budgeted_expense',
       'total_actual_expense', 'expense_diff', 'expense_diff_percent', 'total_budgeted_revenue',
@@ -104,39 +92,12 @@
 
   let activeProcess = {
     resolvePeriod: null,
-    resolveBudgetVersion: null,
     sourceEventName: ''
   };
 
-  /**
-   * Converts Grist's columnar data into a standard array of objects.
-   * e.g., {id: [1], Name: ['A']} -> [{id: 1, fields: {Name: 'A'}}]
-   */
-  function normalizeTableData(tableData) {
-    if (!tableData || typeof tableData !== 'object') return [];
-    if (Array.isArray(tableData)) return tableData; 
-    
-    const keys = Object.keys(tableData);
-    if (!keys.includes('id') || !Array.isArray(tableData.id)) return [];
-
-    const numRecords = tableData.id.length;
-    const records = [];
-    
-    for (let i = 0; i < numRecords; i++) {
-        const record = { id: tableData.id[i], fields: {} };
-        for (const key of keys) {
-            if (key !== 'id') {
-                record.fields[key] = tableData[key][i];
-            }
-        }
-        records.push(record);
-    }
-    return records;
-  }
-
   function setUIState(state, message = '') {
-    console.log(`Setting UI state to: ${state}`, message); // Debug log
-    ['initial-state', 'selection-state', 'processing-state', 'period-selector-container', 'budget-version-selector-container'].forEach(id => {
+    console.log(`Setting UI state to: ${state}`, message);
+    ['initial-state', 'selection-state', 'processing-state', 'period-selector-container'].forEach(id => {
         document.getElementById(id).classList.add('hidden');
     });
     document.getElementById('status').textContent = '';
@@ -152,21 +113,36 @@
       document.getElementById('processing-message').textContent = message;
     } else if (state === 'selectingPeriod') {
       document.getElementById('period-selector-container').classList.remove('hidden');
-    } else if (state === 'selectingBudgetVersion') {
-      document.getElementById('budget-version-selector-container').classList.remove('hidden');
     } else if (['success', 'error'].includes(state)) {
       document.getElementById('status').textContent = message;
       document.getElementById('status').className = `status-${state}`;
-      // After success/error, always show the selection state
       document.getElementById('selection-state').classList.remove('hidden');
     }
+  }
+
+  function normalizeTableData(tableData) {
+    if (!tableData || typeof tableData !== 'object') return [];
+    if (Array.isArray(tableData)) return tableData; 
+    const keys = Object.keys(tableData);
+    if (!keys.includes('id') || !Array.isArray(tableData.id)) return [];
+    const numRecords = tableData.id.length;
+    const records = [];
+    for (let i = 0; i < numRecords; i++) {
+        const record = { id: tableData.id[i], fields: {} };
+        for (const key of keys) {
+            if (key !== 'id') {
+                record.fields[key] = tableData[key][i];
+            }
+        }
+        records.push(record);
+    }
+    return records;
   }
 
   async function fetchDataForSelector(tableName, displayColumn) {
       const raw = await grist.docApi.fetchTable(tableName);
       const data = normalizeTableData(raw);
       if (!data.length) return [];
-      // Check if displayColumn exists
       if (data.length > 0 && data[0].fields[displayColumn] === undefined) {
         console.error(`Column '${displayColumn}' not found in table '${tableName}'. Using 'id' instead.`);
         displayColumn = 'id';
@@ -190,27 +166,14 @@
 
   function cancelProcess() {
     if (activeProcess.resolvePeriod) activeProcess.resolvePeriod(null);
-    if (activeProcess.resolveBudgetVersion) activeProcess.resolveBudgetVersion(null);
     setUIState('selection', activeProcess.sourceEventName);
   }
-  document.getElementById('cancel-process-1').addEventListener('click', cancelProcess);
-  document.getElementById('cancel-process-2').addEventListener('click', cancelProcess);
-
-  async function promptForSelection(state, selectId, data) {
-    populateSelector(selectId, data);
-    setUIState(state);
-    return new Promise(resolve => {
-        if (state === 'selectingPeriod') activeProcess.resolvePeriod = resolve;
-        if (state === 'selectingBudgetVersion') activeProcess.resolveBudgetVersion = resolve;
-    });
-  }
   
-  document.getElementById('confirm-period').addEventListener('click', () => {
+  document.getElementById('confirm-duplication').addEventListener('click', () => {
     if (activeProcess.resolvePeriod) activeProcess.resolvePeriod(parseInt(document.getElementById('period-select').value, 10));
   });
-  document.getElementById('confirm-duplication').addEventListener('click', () => {
-    if (activeProcess.resolveBudgetVersion) activeProcess.resolveBudgetVersion(parseInt(document.getElementById('budget-version-select').value, 10));
-  });
+  document.getElementById('cancel-duplication').addEventListener('click', cancelProcess);
+
 
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
     if (!sourceDate || !targetPeriodYear) return sourceDate;
@@ -218,7 +181,7 @@
       const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
       if (isNaN(date.getTime())) return sourceDate;
       date.setFullYear(targetPeriodYear);
-      return date.getTime() / 1000; // Grist uses seconds since epoch
+      return date.getTime() / 1000;
     } catch (e) { return sourceDate; }
   }
 
@@ -246,14 +209,11 @@
 
   async function cloneRelatedRecords(options) {
       const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumn, childLinkColumn } = options;
-
       const filter = { [parentLinkColumn]: [sourceParentId] };
       const childrenRaw = await grist.docApi.fetchTable(parentTable, filter);
       const children = normalizeTableData(childrenRaw);
-
       if (children.length === 0) return;
       setUIState('processing', `Cloning ${children.length} ${parentTable} records...`);
-
       const oldChildIds = children.map(c => c.id);
       const newChildrenData = children.map(c => {
           const data = cleanRecordData(c.fields);
@@ -261,16 +221,12 @@
           return data;
       });
       const newChildIds = await addRecords(parentTable, newChildrenData);
-
       if (!childTable || !childLinkColumn || newChildIds.length === 0) return;
       const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
-
       const grandchildrenRaw = await grist.docApi.fetchTable(childTable, { [childLinkColumn]: oldChildIds });
       const grandchildren = normalizeTableData(grandchildrenRaw);
-      
       if (grandchildren.length === 0) return;
       setUIState('processing', `Cloning ${grandchildren.length} ${childTable} records...`);
-      
       const newGrandchildrenData = grandchildren.map(gc => {
           const newParentChildId = oldToNewChildIdMap.get(gc.fields[childLinkColumn]);
           if (!newParentChildId) return null;
@@ -278,10 +234,8 @@
           data[childLinkColumn] = newParentChildId;
           return data;
       }).filter(Boolean);
-
       await addRecords(childTable, newGrandchildrenData);
   }
-
 
   async function duplicateSelectedEvent() {
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
@@ -294,10 +248,6 @@
       setUIState('processing', 'Fetching source event...');
       const allEventsRaw = await grist.docApi.fetchTable(config.tables.EVENTS);
       const allEvents = normalizeTableData(allEventsRaw);
-
-      // Debugging: Log the IDs we found
-      console.log('Searching for ID:', sourceEventId, 'in IDs:', allEvents.map(e => e.id));
-
       const sourceEvent = allEvents.find(e => e.id === sourceEventId);
       if (!sourceEvent) {
         throw new Error(`Could not find event with ID ${sourceEventId}. It may have been deleted. Please re-select a new event.`);
@@ -308,15 +258,20 @@
       // Step 1: Prompt for Period
       setUIState('processing', 'Loading periods...');
       const periods = await fetchDataForSelector(config.tables.PERIODS, 'Name');
-      const targetPeriodId = await promptForSelection('selectingPeriod', 'period-select', periods);
-      if (!targetPeriodId) { cancelProcess(); return; }
+       if (periods.length === 0) {
+        setUIState('error', 'No Periods found to select from.');
+        return;
+      }
+      
+      populateSelector('period-select', periods);
+      setUIState('selectingPeriod');
+      const targetPeriodId = await new Promise(resolve => {
+        activeProcess.resolvePeriod = resolve;
+      });
 
-      // Step 2: Prompt for Budget Version
-      setUIState('processing', 'Loading budget versions...');
-      const budgetVersions = await fetchDataForSelector(config.tables.PERIOD_BUDGET_VERSIONS, 'Version_Name');
-      const targetBudgetVersionId = await promptForSelection('selectingBudgetVersion', 'budget-version-select', budgetVersions);
-      if (!targetBudgetVersionId) { cancelProcess(); return; }
+      if (!targetPeriodId) { cancelProcess(); return; } // User clicked cancel
 
+      // Find target year from selected period
       const targetPeriod = periods.find(p => p.id === targetPeriodId);
       let targetYear = new Date().getFullYear();
       if (targetPeriod && targetPeriod.text) {
@@ -326,15 +281,19 @@
       
       setUIState('processing', 'Cloning main event...');
       const newEventData = cleanRecordData(sourceEventFields);
-      newEventData.Name = `${sourceEventFields.Name || 'Event'} (Copy)`;
-      newEventData.Period = targetPeriodId; // From 'EVENTS' schema
       
-      // Set the reference to the selected Budget Version
-      // This relies on the column existing in the 'Events' table
-      newEventData[config.columnNames.BUDGET_VERSION_LINK] = targetBudgetVersionId;
+      // Set new name as requested
+      newEventData.Name = `COPY OF ${sourceEventFields.Name || 'Event'}`;
       
-      newEventData.EventStatus = 1; // Default to 'Planning' or 'New'
-      newEventData.Notes = null; // Clear notes
+      // Set new period
+      newEventData.Period = targetPeriodId;
+      
+      // Copy BudgetVersion from source event
+      newEventData[config.columnNames.BUDGET_VERSION_LINK] = sourceEventFields[config.columnNames.BUDGET_VERSION_LINK];
+      
+      // Set defaults
+      newEventData.EventStatus = 1;
+      newEventData.Notes = null;
       newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
       newEventData.DateEnd = adjustDateToTargetYear(sourceEventFields.DateEnd, targetYear);
       
@@ -372,8 +331,6 @@
     table: config.tables.EVENTS, 
   });
 
-  // This is the simplest, most robust handler.
-  // If this doesn't update the UI, the "Select By" Grist setting is wrong.
   grist.onRecord(function(record) {
     console.log('grist.onRecord fired:', record);
     if (record && record.id) {
