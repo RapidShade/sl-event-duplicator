@@ -136,7 +136,6 @@
       const { parentRecords, childTable, newParentIdMap, childLinkColumnId } = options;
       
       if (parentRecords.length === 0) return;
-
       const oldParentIds = parentRecords.map(p => p.id);
       
       const filter = { [childLinkColumnId]: oldParentIds };
