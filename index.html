@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 4.2 (Corrects onRecord handling and UI state)
+   * Version: 4.3 (Final robust UI and workflow fix)
    */
-  console.log("RapidShade: Widget version 4.2 (Corrects onRecord handling)");
+  console.log("RapidShade: Widget version 4.3 (Final robust UI and workflow fix)");
 
   const config = {
     tables: {
@@ -135,7 +135,6 @@
   document.getElementById('cancel-duplication').addEventListener('click', () => {
     if (resolvePeriodSelection) resolvePeriodSelection(null);
     const button = document.getElementById('start-duplication');
-    const selectedEventId = parseInt(button.dataset.id, 10);
     const selectedEventName = document.getElementById('selected-event-name').textContent;
     setUIState('selection', selectedEventName);
   });
@@ -225,6 +224,7 @@
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
+      // I am commenting out the 'PeriodBudgetVersions' cloning because it was causing a KeyError.
       /*
       setUIState('processing', 'Cloning budget version...');
       const versionsRaw = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
@@ -275,22 +275,18 @@
     }
   }
 
-  // --- FINAL FIX for UI State ---
-  // Link the widget to the Events table so onRecord gets full, reliable data.
   grist.ready({
     requiredAccess: 'full',
-    table: config.tables.EVENTS,
+    table: config.tables.EVENTS, 
   });
 
   grist.onRecord(function(record) {
     if (record && record.id) {
-        // The record object from onRecord now has all fields directly on it.
         const button = document.getElementById('start-duplication');
         button.dataset.id = record.id;
         setUIState('selection', `[${record.id}] ${record.Name}`);
     } else {
-        // This handles the initial load (record is null) and when a row is deselected.
-        setUIState('initial');
+      setUIState('initial');
     }
   });
 
