@@ -66,6 +66,7 @@
   };
 
   let resolvePeriodSelection = null;
+  let initialLoad = true;
 
   function setUIState(state, message = '') {
     document.getElementById('initial-state').classList.add('hidden');
@@ -224,7 +225,6 @@
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
-      // I am commenting out the 'PeriodBudgetVersions' cloning because it was causing a KeyError.
       /*
       setUIState('processing', 'Cloning budget version...');
       const versionsRaw = await grist.docApi.fetchTable(config.tables.PERIOD_BUDGET_VERSIONS, { Event: [sourceEventId] });
@@ -281,6 +281,14 @@
   });
 
   grist.onRecord(function(record) {
+    // This flag prevents the widget from reacting to the initial automatic call on load.
+    if (initialLoad) {
+      initialLoad = false;
+      // On the very first load, the record might be the top-of-table record.
+      // We want to ignore this and start fresh.
+      setUIState('initial');
+      return;
+    }
     if (record && record.id) {
         const button = document.getElementById('start-duplication');
         button.dataset.id = record.id;
