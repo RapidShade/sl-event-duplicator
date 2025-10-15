@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v5.1</title>
+  <title>Duplicate Event Widget v5.2</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -17,7 +17,7 @@
     .status-success { color: green; }
     .status-error   { color: red; }
     h2#widget-title { font-size: 1.2em; margin-bottom: 1rem; }
-    #initial-state p, #selection-state p { margin-top: 0.5rem; }
+    #initial-state p, #selection-state p { margin-top: 0.5rem; word-wrap: break-word; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
@@ -55,13 +55,19 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 5.1 (Corrects data model for PeriodBudgetVersions and simplifies onRecord handler)
+   * Version: 5.2 (Uses correct schemas, fixes logic, and clarifies root cause)
    */
-  const WIDGET_VERSION = "v5.1";
+  const WIDGET_VERSION = "v5.2";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
 
+  /****************************************************************************
+   * ACTION REQUIRED: CONFIGURATION
+   * Based on your schemas. Please verify the BUDGET_VERSION_LINK.
+   * You MUST add a column to your 'Events' table that is a 
+   * Reference to 'PeriodBudgetVersions' for this to work.
+   ****************************************************************************/
   const config = {
     tables: {
       EVENTS:                 "Events",
@@ -73,15 +79,28 @@
       PERIOD_BUDGET_VERSIONS: "PeriodBudgetVersions",
     },
     columnNames: {
-      // FIX #1: The name of the column in the 'Events' table that links to 'PeriodBudgetVersions'
-      BUDGET_VERSION_LINK: "BudgetVersion", // <-- ACTION: VERIFY THIS COLUMN NAME
+      // The column in 'Events' that links to 'PeriodBudgetVersions'.
+      // YOU MUST CREATE THIS COLUMN in your 'Events' table.
+      BUDGET_VERSION_LINK: "BudgetVersion",
+      
+      // Column in Expenses, Revenues, ExpenseDetails, RevenueDetails linking to Events
       EVENT_LINK: "Event",
+      
+      // Column in ExpenseDetails linking to Expenses
       EXPENSE_LINK: "Expense",
+      
+      // Column in RevenueDetails linking to Revenues
       REVENUE_LINK: "Revenue"
     }
   };
 
-  const FORMULA_COLUMNS_TO_EXCLUDE = [ /* ... Omitted for brevity ... */ ];
+  // List of formula/helper columns to exclude from duplication.
+  const FORMULA_COLUMNS_TO_EXCLUDE = [
+      'DisplayStyle', 'EventCode', 'Duplicate_Trigger', 'total_budgeted_expense',
+      'total_actual_expense', 'expense_diff', 'expense_diff_percent', 'total_budgeted_revenue',
+      'total_actual_revenue', 'revenue_diff', 'revenue_diff_percent', 'projected_budget',
+      'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3'
+  ];
 
   let activeProcess = {
     resolvePeriod: null,
@@ -89,8 +108,34 @@
     sourceEventName: ''
   };
 
+  /**
+   * Converts Grist's columnar data into a standard array of objects.
+   * e.g., {id: [1], Name: ['A']} -> [{id: 1, fields: {Name: 'A'}}]
+   */
+  function normalizeTableData(tableData) {
+    if (!tableData || typeof tableData !== 'object') return [];
+    if (Array.isArray(tableData)) return tableData; 
+    
+    const keys = Object.keys(tableData);
+    if (!keys.includes('id') || !Array.isArray(tableData.id)) return [];
+
+    const numRecords = tableData.id.length;
+    const records = [];
+    
+    for (let i = 0; i < numRecords; i++) {
+        const record = { id: tableData.id[i], fields: {} };
+        for (const key of keys) {
+            if (key !== 'id') {
+                record.fields[key] = tableData[key][i];
+            }
+        }
+        records.push(record);
+    }
+    return records;
+  }
+
   function setUIState(state, message = '') {
-    console.log(`Setting UI state to: ${state}`, message); // For debugging the selection issue
+    console.log(`Setting UI state to: ${state}`, message); // Debug log
     ['initial-state', 'selection-state', 'processing-state', 'period-selector-container', 'budget-version-selector-container'].forEach(id => {
         document.getElementById(id).classList.add('hidden');
     });
@@ -112,16 +157,24 @@
     } else if (['success', 'error'].includes(state)) {
       document.getElementById('status').textContent = message;
       document.getElementById('status').className = `status-${state}`;
+      // After success/error, always show the selection state
       document.getElementById('selection-state').classList.remove('hidden');
     }
   }
 
-  function normalizeTableData(tableData) { /* ... Omitted for brevity, unchanged ... */ return []; }
-
   async function fetchDataForSelector(tableName, displayColumn) {
       const raw = await grist.docApi.fetchTable(tableName);
       const data = normalizeTableData(raw);
-      return data.map(record => ({ id: record.id, text: record.fields[displayColumn] || `ID: ${record.id}` }));
+      if (!data.length) return [];
+      // Check if displayColumn exists
+      if (data.length > 0 && data[0].fields[displayColumn] === undefined) {
+        console.error(`Column '${displayColumn}' not found in table '${tableName}'. Using 'id' instead.`);
+        displayColumn = 'id';
+      }
+      return data.map(record => ({ 
+        id: record.id, 
+        text: displayColumn === 'id' ? `ID: ${record.id}` : (record.fields[displayColumn] || `ID: ${record.id}`)
+      }));
   }
 
   function populateSelector(selectId, options) {
@@ -159,7 +212,76 @@
     if (activeProcess.resolveBudgetVersion) activeProcess.resolveBudgetVersion(parseInt(document.getElementById('budget-version-select').value, 10));
   });
 
-  // Other helper functions (adjustDateToTargetYear, addRecords, cleanRecordData, cloneRelatedRecords) are unchanged...
+  function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
+    if (!sourceDate || !targetPeriodYear) return sourceDate;
+    try {
+      const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
+      if (isNaN(date.getTime())) return sourceDate;
+      date.setFullYear(targetPeriodYear);
+      return date.getTime() / 1000; // Grist uses seconds since epoch
+    } catch (e) { return sourceDate; }
+  }
+
+  async function addRecords(tableName, records) {
+    if (!records || records.length === 0) return [];
+    console.log(`Adding ${records.length} records to ${tableName}`);
+    const actions = records.map(record => ['AddRecord', tableName, null, record]);
+    const results = await grist.docApi.applyUserActions(actions);
+    if (results && results.retValues && Array.isArray(results.retValues)) {
+      return results.retValues;
+    }
+    return Array.isArray(results) ? results.map(r => r?.id || r) : [results?.id || results];
+  }
+
+  function cleanRecordData(recordFields) {
+      const cleanedData = { ...recordFields };
+      delete cleanedData.id;
+      Object.keys(cleanedData).forEach(key => {
+        if (key.startsWith('gristHelper_') || FORMULA_COLUMNS_TO_EXCLUDE.includes(key)) {
+          delete cleanedData[key];
+        }
+      });
+      return cleanedData;
+  }
+
+  async function cloneRelatedRecords(options) {
+      const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumn, childLinkColumn } = options;
+
+      const filter = { [parentLinkColumn]: [sourceParentId] };
+      const childrenRaw = await grist.docApi.fetchTable(parentTable, filter);
+      const children = normalizeTableData(childrenRaw);
+
+      if (children.length === 0) return;
+      setUIState('processing', `Cloning ${children.length} ${parentTable} records...`);
+
+      const oldChildIds = children.map(c => c.id);
+      const newChildrenData = children.map(c => {
+          const data = cleanRecordData(c.fields);
+          data[parentLinkColumn] = newParentId;
+          return data;
+      });
+      const newChildIds = await addRecords(parentTable, newChildrenData);
+
+      if (!childTable || !childLinkColumn || newChildIds.length === 0) return;
+      const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
+
+      const grandchildrenRaw = await grist.docApi.fetchTable(childTable, { [childLinkColumn]: oldChildIds });
+      const grandchildren = normalizeTableData(grandchildrenRaw);
+      
+      if (grandchildren.length === 0) return;
+      setUIState('processing', `Cloning ${grandchildren.length} ${childTable} records...`);
+      
+      const newGrandchildrenData = grandchildren.map(gc => {
+          const newParentChildId = oldToNewChildIdMap.get(gc.fields[childLinkColumn]);
+          if (!newParentChildId) return null;
+          const data = cleanRecordData(gc.fields);
+          data[childLinkColumn] = newParentChildId;
+          return data;
+      }).filter(Boolean);
+
+      await addRecords(childTable, newGrandchildrenData);
+  }
+
 
   async function duplicateSelectedEvent() {
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
@@ -170,9 +292,16 @@
 
     try {
       setUIState('processing', 'Fetching source event...');
-      const allEvents = normalizeTableData(await grist.docApi.fetchTable(config.tables.EVENTS));
+      const allEventsRaw = await grist.docApi.fetchTable(config.tables.EVENTS);
+      const allEvents = normalizeTableData(allEventsRaw);
+
+      // Debugging: Log the IDs we found
+      console.log('Searching for ID:', sourceEventId, 'in IDs:', allEvents.map(e => e.id));
+
       const sourceEvent = allEvents.find(e => e.id === sourceEventId);
-      if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}`);
+      if (!sourceEvent) {
+        throw new Error(`Could not find event with ID ${sourceEventId}. It may have been deleted. Please re-select a new event.`);
+      }
       
       const sourceEventFields = sourceEvent.fields;
 
@@ -182,7 +311,7 @@
       const targetPeriodId = await promptForSelection('selectingPeriod', 'period-select', periods);
       if (!targetPeriodId) { cancelProcess(); return; }
 
-      // FIX #2: Step 2: Prompt for Budget Version
+      // Step 2: Prompt for Budget Version
       setUIState('processing', 'Loading budget versions...');
       const budgetVersions = await fetchDataForSelector(config.tables.PERIOD_BUDGET_VERSIONS, 'Version_Name');
       const targetBudgetVersionId = await promptForSelection('selectingBudgetVersion', 'budget-version-select', budgetVersions);
@@ -198,22 +327,38 @@
       setUIState('processing', 'Cloning main event...');
       const newEventData = cleanRecordData(sourceEventFields);
       newEventData.Name = `${sourceEventFields.Name || 'Event'} (Copy)`;
-      newEventData.Period = targetPeriodId;
-      // FIX #3: Set the reference to the selected Budget Version
+      newEventData.Period = targetPeriodId; // From 'EVENTS' schema
+      
+      // Set the reference to the selected Budget Version
+      // This relies on the column existing in the 'Events' table
       newEventData[config.columnNames.BUDGET_VERSION_LINK] = targetBudgetVersionId;
-      newEventData.EventStatus = 1;
-      newEventData.Notes = null;
+      
+      newEventData.EventStatus = 1; // Default to 'Planning' or 'New'
+      newEventData.Notes = null; // Clear notes
       newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
       newEventData.DateEnd = adjustDateToTargetYear(sourceEventFields.DateEnd, targetYear);
       
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
-      // FIX #4: Removed the logic that incorrectly tried to clone a PeriodBudgetVersions record.
-      
-      // The logic for cloning actual child tables (Expenses, Revenues) remains correct.
-      await cloneRelatedRecords({ /* ... */ });
-      await cloneRelatedRecords({ /* ... */ });
+      // Clone child tables
+      await cloneRelatedRecords({
+          parentTable: config.tables.EXPENSES,
+          childTable: config.tables.EXPENSE_DETAILS,
+          sourceParentId: sourceEventId,
+          newParentId: newEventId,
+          parentLinkColumn: config.columnNames.EVENT_LINK,
+          childLinkColumn: config.columnNames.EXPENSE_LINK
+      });
+
+      await cloneRelatedRecords({
+          parentTable: config.tables.REVENUES,
+          childTable: config.tables.REVENUE_DETAILS,
+          sourceParentId: sourceEventId,
+          newParentId: newEventId,
+          parentLinkColumn: config.columnNames.EVENT_LINK,
+          childLinkColumn: config.columnNames.REVENUE_LINK
+      });
 
       setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully!`);
     } catch (err) {
@@ -227,10 +372,10 @@
     table: config.tables.EVENTS, 
   });
 
-  // FIX #5: Simplified onRecord handler. This is the most standard implementation.
-  // It should correctly update the UI on load and on every subsequent click.
-  // If it still fails to update visually, the issue is likely outside this script.
+  // This is the simplest, most robust handler.
+  // If this doesn't update the UI, the "Select By" Grist setting is wrong.
   grist.onRecord(function(record) {
+    console.log('grist.onRecord fired:', record);
     if (record && record.id) {
         const button = document.getElementById('start-duplication');
         button.dataset.id = record.id;
@@ -242,12 +387,6 @@
 
   document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
 
-  // NOTE: Full code for helper functions omitted for brevity, but they are included in the final file.
-  function cleanRecordData(recordFields){ const cleanedData = { ...recordFields }; delete cleanedData.id; Object.keys(cleanedData).forEach(key => { if (key.startsWith('gristHelper_') || FORMULA_COLUMNS_TO_EXCLUDE.includes(key)) { delete cleanedData[key]; } }); return cleanedData; }
-  async function cloneRelatedRecords(options) { const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumn, childLinkColumn } = options; const filter = { [parentLinkColumn]: [sourceParentId] }; const childrenRaw = await grist.docApi.fetchTable(parentTable, filter); const children = normalizeTableData(childrenRaw); if (children.length === 0) return; setUIState('processing', `Cloning ${children.length} ${parentTable} records...`); const oldChildIds = children.map(c => c.id); const newChildrenData = children.map(c => { const data = cleanRecordData(c.fields); data[parentLinkColumn] = newParentId; return data; }); const newChildIds = await addRecords(parentTable, newChildrenData); if (!childTable || !childLinkColumn) return; const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]])); const grandchildrenRaw = await grist.docApi.fetchTable(childTable, { [childLinkColumn]: oldChildIds }); const grandchildren = normalizeTableData(grandchildrenRaw); if (grandchildren.length === 0) return; setUIState('processing', `Cloning ${grandchildren.length} ${childTable} records...`); const newGrandchildrenData = grandchildren.map(gc => { const newParentChildId = oldToNewChildIdMap.get(gc.fields[childLinkColumn]); if (!newParentChildId) return null; const data = cleanRecordData(gc.fields); data[childLinkColumn] = newParentChildId; return data; }).filter(Boolean); await addRecords(childTable, newGrandchildrenData); }
-  function adjustDateToTargetYear(sourceDate, targetPeriodYear) { if (!sourceDate || !targetPeriodYear) return sourceDate; try { const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate); if (isNaN(date.getTime())) return sourceDate; date.setFullYear(targetPeriodYear); return date.getTime() / 1000; } catch (e) { return sourceDate; } }
-  async function addRecords(tableName, records) { if (!records || records.length === 0) return []; const actions = records.map(record => ['AddRecord', tableName, null, record]); const results = await grist.docApi.applyUserActions(actions); if (results && results.retValues && Array.isArray(results.retValues)) { return results.retValues; } return Array.isArray(results) ? results.map(r => r?.id || r) : [results?.id || results]; }
-  
 </script>
 </body>
 </html>
