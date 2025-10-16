@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.6.0</title>
+  <title>Duplicate Event Widget v10.7.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -24,7 +24,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.6.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.7.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -49,9 +49,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.6.0 (Adds write permission check on initialization)
+   * Version: v10.7.0 (Improves permission check to prevent orphaned records)
    */
-  const WIDGET_VERSION = "v10.6.0";
+  const WIDGET_VERSION = "v10.7.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -75,7 +75,7 @@
       'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff',
       'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2',
       'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance',
-      'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID', 'Notes'
+      'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
   ];
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
@@ -264,30 +264,38 @@
   // START PERMISSION CHECK
   /**
    * Checks if the current user has write permissions on the Events table.
-   * It does this by attempting to add and immediately remove a temporary record.
+   * It uses a try...finally block to ensure the temporary record is always cleaned up.
    * @returns {Promise<boolean>} True if user has write access, false otherwise.
    */
   async function checkWritePermissions() {
+    let newRecordId = null;
     try {
-      // Create a temporary record. Using a unique name to avoid any potential conflicts.
       const tempName = `__PERMISSION_CHECK_${Date.now()}`;
       const addResult = await grist.docApi.applyUserActions([
         ['AddRecord', config.tables.EVENTS, null, { Name: tempName }]
       ]);
-      
-      const newRecordId = addResult?.retValues?.[0]?.id;
-
-      // If we successfully added a record, we must clean it up immediately.
-      if (newRecordId) {
-        await grist.docApi.applyUserActions([
-          ['RemoveRecord', config.tables.EVENTS, newRecordId]
-        ]);
-      }
-      console.log("Permission check successful.");
-      return true;
+      newRecordId = addResult?.retValues?.[0]?.id;
+      // If we got an ID, the user has write permission.
+      return !!newRecordId;
     } catch (err) {
+      // If the add action fails, it's a permission error.
       console.warn("Permission check failed, user likely does not have write access.", err);
       return false;
+    } finally {
+      // This block ALWAYS runs if a record was created, ensuring cleanup.
+      if (newRecordId) {
+        try {
+          console.log(`Cleaning up temporary record ID: ${newRecordId}`);
+          await grist.docApi.applyUserActions([
+            ['RemoveRecord', config.tables.EVENTS, newRecordId]
+          ]);
+          console.log("Cleanup successful.");
+        } catch (cleanupErr) {
+          // This is the rare edge case where cleanup fails.
+          console.error(`Failed to clean up temporary permission-check record (ID: ${newRecordId}). ` +
+            `This may need to be manually deleted. Error:`, cleanupErr);
+        }
+      }
     }
   }
   // END PERMISSION CHECK
