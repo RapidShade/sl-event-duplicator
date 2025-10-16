@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v7.7</title>
+  <title>Duplicate Event Widget v8.0.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 7.6 (Uses robust JS filtering for all child records)
+   * Version: 8.0.0 (Uses robust JS filtering for all data fetching)
    */
-  const WIDGET_VERSION = "v7.6";
+  const WIDGET_VERSION = "v8.0.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -238,9 +238,9 @@
 
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
-  grist.onRecord(record => {
-    // onRecord is now only used to get the ID and display name for the UI.
-    // The full, raw data is fetched later when the button is clicked.
+  grist.onRecord((record, mappings) => {
+    // onRecord gives us the display-ready data, perfect for the UI.
+    // We only use it to get the ID and the display name.
     if (record?.id) {
         document.getElementById('start-duplication').dataset.id = record.id;
         setUIState('selection', `[${record.id}] ${record.Name}`);
