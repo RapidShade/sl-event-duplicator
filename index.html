@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.4.0</title>
+  <title>Duplicate Event Widget v10.5.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.4.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.5.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.4.0 (Fixes CORS error by passing auth token in URL)
+   * Version: v10.5.0 (Fixes invalid reference issue by fetching raw record data)
    */
-  const WIDGET_VERSION = "v10.4.0";
+  const WIDGET_VERSION = "v10.5.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -134,14 +134,10 @@
     const gristOrigin = new URL(document.referrer).origin;
     const apiPath = new URL(tokenInfo.baseUrl).pathname; // This gets the path, e.g., /api/docs/XYZ
     
-    // START FIX: Address CORS 'Authorization' header issue.
-    // Pass the token as a URL parameter ('auth=...') instead of a header.
-    // This avoids a CORS preflight request that the server is configured to reject.
+    // Pass the token as a URL parameter ('auth=...') to avoid CORS issues with the Authorization header.
     const url = `${gristOrigin}${apiPath}/tables/${tableId}/records?filter=${filterString}&auth=${tokenInfo.token}`;
-    // END FIX
 
     console.log(`Fetching from API: ${url}`);
-    // No 'Authorization' header is needed anymore.
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -217,14 +213,26 @@
         throw new Error("Widget is not ready. Please wait a moment and try again.");
       }
       setUIState('processing', 'Preparing source event...');
-      const sourceEventFields = lastSelectedRecord;
-      if (!sourceEventFields || !sourceEventFields.id) {
+      const sourceEventFromOnRecord = lastSelectedRecord; // from onRecord
+      if (!sourceEventFromOnRecord || !sourceEventFromOnRecord.id) {
           throw new Error(`No event is selected. Please click on a record in the table first.`);
       }
-      const sourceEventId = sourceEventFields.id;
+      const sourceEventId = sourceEventFromOnRecord.id;
+      // Keep the original name for the success message, as it's guaranteed to be in the onRecord payload
+      const sourceEventNameForMessage = sourceEventFromOnRecord.Name || 'Unknown';
+
+      // START FIX: Fetch the full source record using the API to ensure we get raw reference IDs
+      // instead of potentially resolved text values from onRecord.
+      setUIState('processing', 'Fetching full source event data...');
+      const sourceEventRecords = await fetchRecordsFiltered(config.tables.EVENTS, { id: [sourceEventId] });
+      if (!sourceEventRecords || sourceEventRecords.length === 0) {
+        throw new Error(`Could not fetch the source event record (ID: ${sourceEventId}) from the API.`);
+      }
+      // The API returns { id: X, fields: {...} }. We'll work with the fields object, which now contains raw data.
+      const sourceEventFields = sourceEventRecords[0].fields;
+      // END FIX
 
       setUIState('processing', 'Loading periods...');
-      // Use the new API fetcher to get all periods. An empty filter {} gets all records.
       const periodsRecords = await fetchRecordsFiltered(config.tables.PERIODS, {});
       const periods = periodsRecords.map(p => ({id: p.id, text: p.fields.Name}));
 
@@ -271,7 +279,7 @@
           childLinkColumnId: config.columnIds.REVENUE_LINK
       });
 
-      setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully!`);
+      setUIState('success', `Event '${sourceEventNameForMessage}' duplicated successfully!`);
     } catch (err) {
       console.error('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message || err}`);
