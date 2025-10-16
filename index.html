@@ -177,7 +177,7 @@
 
     try {
       setUIState('processing', 'Fetching source event...');
-      // FIX: Use the API filter with `id`. This is proven to work correctly and reliably.
+      // FIX: Use the API filter with the selected record's ID.
       const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
       const sourceEvent = normalizeData(sourceEventRaw)[0];
       if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
