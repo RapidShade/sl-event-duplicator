@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.0.0</title>
+  <title>Duplicate Event Widget v10.1.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.0.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.1.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.0.0 (Uses Grist REST API for efficient data fetching)
+   * Version: v10.1.0 (Fixes grist.onReady TypeError)
    */
-  const WIDGET_VERSION = "v10.0.0";
+  const WIDGET_VERSION = "v10.1.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -280,8 +280,8 @@
       setUIState('error', `Initialization failed: ${err.message}`);
     }
   }
-  // Call initialization once Grist is fully ready.
-  grist.onReady(initializeWidget);
+  // Call initialization to fetch the API token.
+  initializeWidget();
 
 
   grist.onRecord(record => {
@@ -334,3 +334,4 @@
 </script>
 </body>
 </html>
+
