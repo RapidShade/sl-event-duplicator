@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v8.5.0</title>
+  <title>Duplicate Event Widget v8.6.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,14 +23,14 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v8.5.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v8.6.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
   <div id="selection-state" class="selector-container hidden">
     <h3>Selected Event:</h3>
     <p id="selected-event-name"></p>
-    <button id="start-duplication">Duplicate This Event</button>
+    <button id="start-duplication" data-id="0">Duplicate This Event</button>
   </div>
   <div id="processing-state" class="hidden">
     <div id="loader"></div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 8.5.0 (Fetches raw source record on selection; uses JS filtering for children)
+   * Version: 8.6.0 (Correctly fetches selected event; uses JS filter for children)
    */
-  const WIDGET_VERSION = "v8.5.0";
+  const WIDGET_VERSION = "v8.6.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -77,11 +77,7 @@
       'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
   ];
 
-  let activeSelection = { 
-    event: null,
-    resolvePeriod: null, 
-    sourceEventName: ''
-  };
+  let activeProcess = { resolvePeriod: null, sourceEventName: '' };
 
   function setUIState(state, message = '') {
     console.log(`Setting UI state to: ${state}`, message);
@@ -93,7 +89,7 @@
     else if (state === 'selection') {
       document.getElementById('selection-state').classList.remove('hidden');
       document.getElementById('selected-event-name').textContent = message;
-      activeSelection.sourceEventName = message;
+      activeProcess.sourceEventName = message;
     } else if (state === 'processing') {
       document.getElementById('processing-state').classList.remove('hidden');
       document.getElementById('processing-message').textContent = message;
@@ -139,7 +135,10 @@
       const allChildren = normalizeData(allChildrenRaw);
       const childrenToClone = allChildren.filter(c => c.fields[parentLinkColumnId] === sourceParentId);
 
-      if (childrenToClone.length === 0) return;
+      if (childrenToClone.length === 0) {
+        console.log(`No records found in ${parentTable} for Event ID ${sourceParentId}.`);
+        return;
+      }
       setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
       
       const oldChildIds = childrenToClone.map(c => c.id);
@@ -173,11 +172,18 @@
   }
 
   async function duplicateSelectedEvent() {
-    if (!activeSelection.event) { setUIState('error', "No event selected. Please select an event to duplicate."); return; }
-    
-    const sourceEvent = activeSelection.event;
+    const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
+    if (!sourceEventId) { setUIState('error', "No event ID selected."); return; }
 
     try {
+      setUIState('processing', 'Fetching source event...');
+      // FIX: Use the API filter with `id`. This is proven to work correctly and reliably.
+      const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
+      const sourceEvent = normalizeData(sourceEventRaw)[0];
+      if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
+      
+      const sourceEventFields = sourceEvent.fields;
+
       setUIState('processing', 'Loading periods...');
       const periodsRaw = await grist.docApi.fetchTable(config.tables.PERIODS);
       const periods = normalizeData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
@@ -185,7 +191,7 @@
       
       populateSelector('period-select', periods);
       setUIState('selectingPeriod');
-      const targetPeriodId = await new Promise(resolve => { activeSelection.resolvePeriod = resolve; });
+      const targetPeriodId = await new Promise(resolve => { activeProcess.resolvePeriod = resolve; });
 
       if (!targetPeriodId) { cancelProcess(); return; } 
 
@@ -197,34 +203,34 @@
       }
       
       setUIState('processing', 'Cloning main event...');
-      const newEventData = cleanRecordData(sourceEvent.fields);
+      const newEventData = cleanRecordData(sourceEventFields);
       
-      newEventData.Name = `COPY OF ${sourceEvent.fields.Name || 'Event'}`;
+      newEventData.Name = `COPY OF ${sourceEventFields.Name || 'Event'}`;
       newEventData.Period = targetPeriodId;
-      newEventData[config.columnIds.BUDGET_VERSION_LINK] = sourceEvent.fields[config.columnIds.BUDGET_VERSION_LINK];
+      newEventData[config.columnIds.BUDGET_VERSION_LINK] = sourceEventFields[config.columnIds.BUDGET_VERSION_LINK];
       newEventData.EventStatus = 1;
       newEventData.Notes = null;
-      newEventData.DateStart = adjustDateToTargetYear(sourceEvent.fields.DateStart, targetYear);
-      newEventData.DateEnd = adjustDateToTargetYear(sourceEvent.fields.DateEnd, targetYear);
+      newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
+      newEventData.DateEnd = adjustDateToTargetYear(sourceEventFields.DateEnd, targetYear);
       
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
       await cloneRelatedRecords({
           parentTable: config.tables.EXPENSES, childTable: config.tables.EXPENSE_DETAILS,
-          sourceParentId: sourceEvent.id, newParentId: newEventId,
+          sourceParentId: sourceEventId, newParentId: newEventId,
           parentLinkColumnId: config.columnIds.EVENT_LINK,
           childLinkColumnId: config.columnIds.EXPENSE_LINK
       });
 
       await cloneRelatedRecords({
           parentTable: config.tables.REVENUES, childTable: config.tables.REVENUE_DETAILS,
-          sourceParentId: sourceEvent.id, newParentId: newEventId,
+          sourceParentId: sourceEventId, newParentId: newEventId,
           parentLinkColumnId: config.columnIds.EVENT_LINK,
           childLinkColumnId: config.columnIds.REVENUE_LINK
       });
 
-      setUIState('success', `Event '${sourceEvent.fields.Name || 'Unknown'}' duplicated successfully!`);
+      setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully!`);
     } catch (err) {
       console.error('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message || err}`);
@@ -233,23 +239,13 @@
 
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
-  grist.onRecord(async (record) => {
+  grist.onRecord(record => {
+    // onRecord is now only used to get the ID and display name for the UI.
+    // The full, raw data for duplication is fetched later when the button is clicked.
     if (record?.id) {
-        try {
-            // Fetch the full record using docApi to get raw numeric IDs for references.
-            const fullRecordRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [record.id]});
-            const fullRecord = normalizeData(fullRecordRaw)[0];
-            if (fullRecord) {
-                activeSelection.event = fullRecord; // Store the full, raw record
-                const eventName = fullRecord.fields.Name || 'Event without a name';
-                setUIState('selection', `[${fullRecord.id}] ${eventName}`);
-            }
-        } catch (e) {
-            console.error("Error fetching full record:", e);
-            setUIState('error', "Could not fetch event details.");
-        }
+        document.getElementById('start-duplication').dataset.id = record.id;
+        setUIState('selection', `[${record.id}] ${record.Name}`);
     } else {
-      activeSelection.event = null;
       setUIState('initial');
     }
   });
