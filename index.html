@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v9.0.0</title>
+  <title>Duplicate Event Widget v9.1.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,14 +23,14 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v9.0.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v9.1.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
   <div id="selection-state" class="selector-container hidden">
     <h3>Selected Event:</h3>
     <p id="selected-event-name"></p>
-    <button id="start-duplication" data-id="0">Duplicate This Event</button>
+    <button id="start-duplication">Duplicate This Event</button>
   </div>
   <div id="processing-state" class="hidden">
     <div id="loader"></div>
@@ -48,13 +48,13 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v9.0.0 (Correctly fetches selected event; uses JS filter for children)
+   * Version: v9.1.0 (Uses grist.fetchSelectedRecord for reliability)
    */
-  const WIDGET_VERSION = "v9.0.0";
+  const WIDGET_VERSION = "v9.1.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
-  
+
   const config = {
     tables: {
       EVENTS: "Events", EXPENSES: "Expenses", EXPENSE_DETAILS: "ExpenseDetails",
@@ -69,11 +69,11 @@
   };
 
   const FORMULA_AND_SYSTEM_COLUMNS_TO_EXCLUDE = [
-      'CreatedAt', 'UpdatedAt', 'CreatedBy', 'UpdatedBy', 'DisplayStyle', 'EventCode', 
-      'Duplicate_Trigger', 'total_budgeted_expense', 'total_actual_expense', 'expense_diff', 
-      'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff', 
-      'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2', 
-      'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance', 
+      'CreatedAt', 'UpdatedAt', 'CreatedBy', 'UpdatedBy', 'DisplayStyle', 'EventCode',
+      'Duplicate_Trigger', 'total_budgeted_expense', 'total_actual_expense', 'expense_diff',
+      'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff',
+      'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2',
+      'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance',
       'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
   ];
 
@@ -130,7 +130,7 @@
 
   async function cloneRelatedRecords(options) {
       const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumnId, childLinkColumnId } = options;
-      
+
       const allChildrenRaw = await grist.docApi.fetchTable(parentTable);
       const allChildren = normalizeData(allChildrenRaw);
       const childrenToClone = allChildren.filter(c => c.fields[parentLinkColumnId] === sourceParentId);
@@ -140,60 +140,57 @@
         return;
       }
       setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
-      
+
       const oldChildIds = childrenToClone.map(c => c.id);
       const newChildrenData = childrenToClone.map(c => {
-          const data = cleanRecordData(c.fields); 
+          const data = cleanRecordData(c.fields);
           data[parentLinkColumnId] = newParentId;
           return data;
       });
 
       const newChildIds = await addRecords(parentTable, newChildrenData);
-      
+
       if (!childTable || !childLinkColumnId || newChildIds.length === 0) return;
       const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
-      
+
       const allGrandchildrenRaw = await grist.docApi.fetchTable(childTable);
       const allGrandchildren = normalizeData(allGrandchildrenRaw);
       const grandchildrenToClone = allGrandchildren.filter(gc => oldChildIds.includes(gc.fields[childLinkColumnId]));
 
       if (grandchildrenToClone.length === 0) return;
       setUIState('processing', `Cloning ${grandchildrenToClone.length} ${childTable} records...`);
-      
+
       const newGrandchildrenData = grandchildrenToClone.map(gc => {
           const newParentId = oldToNewChildIdMap.get(gc.fields[childLinkColumnId]);
           if (!newParentId) return null;
-          const data = cleanRecordData(gc.fields); 
+          const data = cleanRecordData(gc.fields);
           data[childLinkColumnId] = newParentId;
           return data;
       }).filter(Boolean);
-      
+
       await addRecords(childTable, newGrandchildrenData);
   }
 
   async function duplicateSelectedEvent() {
-    const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
-    if (!sourceEventId) { setUIState('error', "No event ID selected."); return; }
-
     try {
+      // NEW: Use fetchSelectedRecord for a direct and reliable way to get the selected event.
       setUIState('processing', 'Fetching source event...');
-      // FIX: Use the API filter with the selected record's ID.
-      const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
-      const sourceEvent = normalizeData(sourceEventRaw)[0];
-      if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
-      
-      const sourceEventFields = sourceEvent.fields;
+      const sourceEventFields = await grist.fetchSelectedRecord();
+      if (!sourceEventFields || !sourceEventFields.id) {
+          throw new Error(`No event is selected.`);
+      }
+      const sourceEventId = sourceEventFields.id;
 
       setUIState('processing', 'Loading periods...');
       const periodsRaw = await grist.docApi.fetchTable(config.tables.PERIODS);
       const periods = normalizeData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
       if (periods.length === 0) throw new Error('No Periods found to select from.');
-      
+
       populateSelector('period-select', periods);
       setUIState('selectingPeriod');
       const targetPeriodId = await new Promise(resolve => { activeProcess.resolvePeriod = resolve; });
 
-      if (!targetPeriodId) { cancelProcess(); return; } 
+      if (!targetPeriodId) { cancelProcess(); return; }
 
       const targetPeriod = periods.find(p => p.id === targetPeriodId);
       let targetYear = new Date().getFullYear();
@@ -201,10 +198,10 @@
         const yearMatch = targetPeriod.text.match(/(\d{4})/);
         if (yearMatch) targetYear = parseInt(yearMatch[1], 10);
       }
-      
+
       setUIState('processing', 'Cloning main event...');
       const newEventData = cleanRecordData(sourceEventFields);
-      
+
       newEventData.Name = `COPY OF ${sourceEventFields.Name || 'Event'}`;
       newEventData.Period = targetPeriodId;
       newEventData[config.columnIds.BUDGET_VERSION_LINK] = sourceEventFields[config.columnIds.BUDGET_VERSION_LINK];
@@ -212,10 +209,10 @@
       newEventData.Notes = null;
       newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
       newEventData.DateEnd = adjustDateToTargetYear(sourceEventFields.DateEnd, targetYear);
-      
+
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
-      
+
       await cloneRelatedRecords({
           parentTable: config.tables.EXPENSES, childTable: config.tables.EXPENSE_DETAILS,
           sourceParentId: sourceEventId, newParentId: newEventId,
@@ -240,10 +237,8 @@
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
   grist.onRecord(record => {
-    // onRecord is now only used to get the ID and display name for the UI.
-    // The full, raw data for duplication is fetched later when the button is clicked.
+    // The onRecord handler now just updates the UI to show what's selected.
     if (record?.id) {
-        document.getElementById('start-duplication').dataset.id = record.id;
         setUIState('selection', `[${record.id}] ${record.Name}`);
     } else {
       setUIState('initial');
@@ -251,7 +246,7 @@
   });
 
   document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
-  
+
   // --- Helper Functions ---
   async function addRecords(tableName, records) {
     if (!records?.length) return [];
