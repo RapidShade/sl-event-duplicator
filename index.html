@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.3.0</title>
+  <title>Duplicate Event Widget v10.4.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.3.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.4.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.3.0 (Fixes 404 error by using document.referrer for API origin)
+   * Version: v10.4.0 (Fixes CORS error by passing auth token in URL)
    */
-  const WIDGET_VERSION = "v10.3.0";
+  const WIDGET_VERSION = "v10.4.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -127,21 +127,22 @@
 
     const filterString = encodeURIComponent(JSON.stringify(filter));
     
-    // START FIX: Address API URL issues (Mixed Content / incorrect host).
-    // The tokenInfo.baseUrl can return an internal URL (e.g., http://0.0.0.0:8484).
-    // We derive the correct public-facing origin from document.referrer, which is the Grist page that embedded this widget.
+    // Determine the correct API origin from the Grist page that embedded this widget.
     if (!document.referrer) {
       throw new Error("Cannot determine Grist API origin. document.referrer is not available.");
     }
     const gristOrigin = new URL(document.referrer).origin;
     const apiPath = new URL(tokenInfo.baseUrl).pathname; // This gets the path, e.g., /api/docs/XYZ
-    const url = `${gristOrigin}${apiPath}/tables/${tableId}/records?filter=${filterString}`;
+    
+    // START FIX: Address CORS 'Authorization' header issue.
+    // Pass the token as a URL parameter ('auth=...') instead of a header.
+    // This avoids a CORS preflight request that the server is configured to reject.
+    const url = `${gristOrigin}${apiPath}/tables/${tableId}/records?filter=${filterString}&auth=${tokenInfo.token}`;
     // END FIX
 
     console.log(`Fetching from API: ${url}`);
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${tokenInfo.token}` }
-    });
+    // No 'Authorization' header is needed anymore.
+    const response = await fetch(url);
 
     if (!response.ok) {
       const errorText = await response.text();
