@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v7.6</title>
+  <title>Duplicate Event Widget v7.7</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -48,7 +48,7 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: 7.6 (Fixes pink fields by fetching raw record data)
+   * Version: 7.6 (Uses robust JS filtering for all child records)
    */
   const WIDGET_VERSION = "v7.6";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
@@ -128,13 +128,55 @@
       return cleanedData;
   }
 
+  async function cloneRelatedRecords(options) {
+      const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumnId, childLinkColumnId } = options;
+      
+      const allChildrenRaw = await grist.docApi.fetchTable(parentTable);
+      const allChildren = normalizeData(allChildrenRaw);
+      const childrenToClone = allChildren.filter(c => c.fields[parentLinkColumnId] === sourceParentId);
+
+      if (childrenToClone.length === 0) {
+        console.log(`No records found in ${parentTable} for Event ID ${sourceParentId}.`);
+        return;
+      }
+      setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
+      
+      const oldChildIds = childrenToClone.map(c => c.id);
+      const newChildrenData = childrenToClone.map(c => {
+          const data = cleanRecordData(c.fields); 
+          data[parentLinkColumnId] = newParentId;
+          return data;
+      });
+
+      const newChildIds = await addRecords(parentTable, newChildrenData);
+      
+      if (!childTable || !childLinkColumnId || newChildIds.length === 0) return;
+      const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
+      
+      const allGrandchildrenRaw = await grist.docApi.fetchTable(childTable);
+      const allGrandchildren = normalizeData(allGrandchildrenRaw);
+      const grandchildrenToClone = allGrandchildren.filter(gc => oldChildIds.includes(gc.fields[childLinkColumnId]));
+
+      if (grandchildrenToClone.length === 0) return;
+      setUIState('processing', `Cloning ${grandchildrenToClone.length} ${childTable} records...`);
+      
+      const newGrandchildrenData = grandchildrenToClone.map(gc => {
+          const newParentId = oldToNewChildIdMap.get(gc.fields[childLinkColumnId]);
+          if (!newParentId) return null;
+          const data = cleanRecordData(gc.fields); 
+          data[childLinkColumnId] = newParentId;
+          return data;
+      }).filter(Boolean);
+      
+      await addRecords(childTable, newGrandchildrenData);
+  }
+
   async function duplicateSelectedEvent() {
     const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
     if (!sourceEventId) { setUIState('error', "No event ID selected."); return; }
 
     try {
       setUIState('processing', 'Fetching source event...');
-      // Fetch the full raw record using the ID. This is reliable.
       const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
       const sourceEvent = normalizeData(sourceEventRaw)[0];
       if (!sourceEvent) throw new Error(`Could not find event with ID ${sourceEventId}.`);
@@ -163,9 +205,8 @@
       const newEventData = cleanRecordData(sourceEventFields);
       
       newEventData.Name = `COPY OF ${sourceEventFields.Name || 'Event'}`;
-      newEventData.Period = targetPeriodId; // This is a new selection, so we use the new ID
-      // All other reference fields (Sport, EventType, etc.) are already the correct numeric IDs
-      
+      newEventData.Period = targetPeriodId;
+      newEventData[config.columnIds.BUDGET_VERSION_LINK] = sourceEventFields[config.columnIds.BUDGET_VERSION_LINK];
       newEventData.EventStatus = 1;
       newEventData.Notes = null;
       newEventData.DateStart = adjustDateToTargetYear(sourceEventFields.DateStart, targetYear);
@@ -174,10 +215,21 @@
       const newEventIds = await addRecords(config.tables.EVENTS, [newEventData]);
       const newEventId = newEventIds[0];
       
-      // The rest of the child-cloning logic will be added back once this part is confirmed working.
-      // For now, it only clones the main event.
+      await cloneRelatedRecords({
+          parentTable: config.tables.EXPENSES, childTable: config.tables.EXPENSE_DETAILS,
+          sourceParentId: sourceEventId, newParentId: newEventId,
+          parentLinkColumnId: config.columnIds.EVENT_LINK,
+          childLinkColumnId: config.columnIds.EXPENSE_LINK
+      });
 
-      setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully! No child records were copied yet.`);
+      await cloneRelatedRecords({
+          parentTable: config.tables.REVENUES, childTable: config.tables.REVENUE_DETAILS,
+          sourceParentId: sourceEventId, newParentId: newEventId,
+          parentLinkColumnId: config.columnIds.EVENT_LINK,
+          childLinkColumnId: config.columnIds.REVENUE_LINK
+      });
+
+      setUIState('success', `Event '${sourceEventFields.Name || 'Unknown'}' duplicated successfully!`);
     } catch (err) {
       console.error('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message || err}`);
