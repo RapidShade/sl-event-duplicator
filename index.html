@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v9.5.0</title>
+  <title>Duplicate Event Widget v10.0.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v9.5.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.0.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v9.5.0 (Hybrid approach: stores record context from onRecord, then fetches raw data by ID)
+   * Version: v10.0.0 (Uses Grist REST API for efficient data fetching)
    */
-  const WIDGET_VERSION = "v9.5.0";
+  const WIDGET_VERSION = "v10.0.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -78,8 +78,8 @@
   ];
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
-  // From v9.2.0: Variable to store the last selected record's context.
   let lastSelectedRecord = null;
+  let tokenInfo = null; // To store API access token info.
 
   function setUIState(state, message = '') {
     console.log(`Setting UI state to: ${state}`, message);
@@ -100,23 +100,9 @@
     } else if (['success', 'error'].includes(state)) {
       document.getElementById('status').textContent = message;
       document.getElementById('status').className = `status-${state}`;
+      // Return to the selection state after success/error to allow another operation.
       document.getElementById('selection-state').classList.remove('hidden');
     }
-  }
-
-  function normalizeData(tableData) {
-    if (!tableData || typeof tableData !== 'object' || !tableData.id) return [];
-    const keys = Object.keys(tableData);
-    const numRecords = tableData.id.length;
-    const records = [];
-    for (let i = 0; i < numRecords; i++) {
-      const record = { id: tableData.id[i], fields: {} };
-      for (const key of keys) {
-        if (key !== 'id') record.fields[key] = tableData[key][i];
-      }
-      records.push(record);
-    }
-    return records;
   }
 
   function cleanRecordData(recordFields) {
@@ -130,15 +116,43 @@
       return cleanedData;
   }
 
+  /**
+   * Fetches records from a table using the Grist REST API with filtering.
+   * @param {string} tableId - The ID of the table to fetch from.
+   * @param {object} filter - A filter object, e.g., { ColumnName: [value1, value2] }.
+   * @returns {Promise<Array>} A promise that resolves to an array of record objects.
+   */
+  async function fetchRecordsFiltered(tableId, filter = {}) {
+    if (!tokenInfo) { throw new Error("API not initialized. Cannot fetch records."); }
+
+    const filterString = encodeURIComponent(JSON.stringify(filter));
+    const url = `${tokenInfo.baseUrl}/tables/${tableId}/records?filter=${filterString}`;
+
+    console.log(`Fetching from API: ${url}`);
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${tokenInfo.token}` }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`API Error Response for ${tableId}:`, errorText);
+      throw new Error(`API Error (${response.status}) while fetching '${tableId}'. See console for details.`);
+    }
+
+    const data = await response.json();
+    // API returns records in { "records": [ { "id": 1, "fields": { ... } } ] } format.
+    return data.records;
+  }
+
   async function cloneRelatedRecords(options) {
       const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumnId, childLinkColumnId } = options;
 
-      const allChildrenRaw = await grist.docApi.fetchTable(parentTable);
-      const allChildren = normalizeData(allChildrenRaw);
-      const childrenToClone = allChildren.filter(c => c.fields[parentLinkColumnId] === sourceParentId);
+      // Efficiently fetch only the child records related to the source event.
+      const childrenFilter = { [parentLinkColumnId]: [sourceParentId] };
+      const childrenToClone = await fetchRecordsFiltered(parentTable, childrenFilter);
 
       if (childrenToClone.length === 0) {
-        console.log(`No records found in ${parentTable} for Event ID ${sourceParentId}.`);
+        console.log(`No records found in ${parentTable} for parent ID ${sourceParentId}.`);
         return;
       }
       setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
@@ -151,49 +165,58 @@
       });
 
       const newChildIds = await addRecords(parentTable, newChildrenData);
+      if (newChildIds.length === 0) {
+        console.warn(`Failed to create new records in ${parentTable}. Aborting grandchild clone.`);
+        return;
+      }
 
-      if (!childTable || !childLinkColumnId || newChildIds.length === 0) return;
+      if (!childTable || !childLinkColumnId) return;
+
       const oldToNewChildIdMap = new Map(oldChildIds.map((oldId, i) => [oldId, newChildIds[i]]));
 
-      const allGrandchildrenRaw = await grist.docApi.fetchTable(childTable);
-      const allGrandchildren = normalizeData(allGrandchildrenRaw);
-      const grandchildrenToClone = allGrandchildren.filter(gc => oldChildIds.includes(gc.fields[childLinkColumnId]));
+      // Efficiently fetch only the grandchildren records related to the cloned children.
+      const grandchildrenFilter = { [childLinkColumnId]: oldChildIds };
+      const grandchildrenToClone = await fetchRecordsFiltered(childTable, grandchildrenFilter);
 
-      if (grandchildrenToClone.length === 0) return;
+      if (grandchildrenToClone.length === 0) {
+        console.log(`No detail records found in ${childTable} for the cloned ${parentTable} records.`);
+        return;
+      }
       setUIState('processing', `Cloning ${grandchildrenToClone.length} ${childTable} records...`);
 
       const newGrandchildrenData = grandchildrenToClone.map(gc => {
-          const newParentId = oldToNewChildIdMap.get(gc.fields[childLinkColumnId]);
-          if (!newParentId) return null;
+          const newParentIdForGrandchild = oldToNewChildIdMap.get(gc.fields[childLinkColumnId]);
+          if (!newParentIdForGrandchild) {
+            console.warn(`Could not find new parent ID for grandchild record ${gc.id}. Skipping.`);
+            return null;
+          }
           const data = cleanRecordData(gc.fields);
-          data[childLinkColumnId] = newParentId;
+          data[childLinkColumnId] = newParentIdForGrandchild;
           return data;
-      }).filter(Boolean);
+      }).filter(Boolean); // Filter out any nulls from skipped records
 
-      await addRecords(childTable, newGrandchildrenData);
+      if (newGrandchildrenData.length > 0) {
+        await addRecords(childTable, newGrandchildrenData);
+      }
   }
 
   async function duplicateSelectedEvent() {
     try {
-      // Step 1: Get the ID from the stored record object (from v9.2.0 logic)
-      const sourceEventId = lastSelectedRecord ? lastSelectedRecord.id : null;
-      if (!sourceEventId) {
-        throw new Error(`No event is selected. Please click on a record in the table first.`);
+      if (!tokenInfo) {
+        throw new Error("Widget is not ready. Please wait a moment and try again.");
       }
-
-      // Step 2: Use that ID to fetch the raw, unfiltered data (from v9.4.0 logic)
-      setUIState('processing', 'Fetching source event data...');
-      const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
-      const sourceEvent = normalizeData(sourceEventRaw)[0];
-
-      if (!sourceEvent) {
-        throw new Error(`Could not find event with ID ${sourceEventId}.`);
+      setUIState('processing', 'Preparing source event...');
+      const sourceEventFields = lastSelectedRecord;
+      if (!sourceEventFields || !sourceEventFields.id) {
+          throw new Error(`No event is selected. Please click on a record in the table first.`);
       }
-      const sourceEventFields = sourceEvent.fields;
+      const sourceEventId = sourceEventFields.id;
 
       setUIState('processing', 'Loading periods...');
-      const periodsRaw = await grist.docApi.fetchTable(config.tables.PERIODS);
-      const periods = normalizeData(periodsRaw).map(p => ({id: p.id, text: p.fields.Name}));
+      // Use the new API fetcher to get all periods. An empty filter {} gets all records.
+      const periodsRecords = await fetchRecordsFiltered(config.tables.PERIODS, {});
+      const periods = periodsRecords.map(p => ({id: p.id, text: p.fields.Name}));
+
       if (periods.length === 0) throw new Error('No Periods found to select from.');
 
       populateSelector('period-select', periods);
@@ -246,11 +269,23 @@
 
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
-  grist.onRecord(record => {
-    // From v9.2.0: Store the entire record object. This is the most reliable way
-    // to keep track of the selection context.
-    lastSelectedRecord = record;
+  async function initializeWidget() {
+    try {
+      console.log('Initializing widget and fetching API token...');
+      // Get a token with write access since we are adding records.
+      tokenInfo = await grist.docApi.getAccessToken({ readOnly: false });
+      console.log('API token received. Widget is ready.');
+    } catch (err) {
+      console.error('Failed to initialize widget:', err);
+      setUIState('error', `Initialization failed: ${err.message}`);
+    }
+  }
+  // Call initialization once Grist is fully ready.
+  grist.onReady(initializeWidget);
 
+
+  grist.onRecord(record => {
+    lastSelectedRecord = record;
     if (record?.id) {
         setUIState('selection', `[${record.id}] ${record.Name}`);
     } else {
@@ -266,7 +301,8 @@
     console.log(`Adding ${records.length} records to ${tableName}`);
     const actions = records.map(record => ['AddRecord', tableName, null, record]);
     const results = await grist.docApi.applyUserActions(actions);
-    return (results?.retValues || []).map(r => r?.id || r);
+    // Ensure results and retValues exist before mapping.
+    return (results?.retValues || []).map(r => r?.id || r).filter(Boolean);
   }
   function adjustDateToTargetYear(sourceDate, targetPeriodYear) {
     if (!sourceDate || !targetPeriodYear) return sourceDate;
