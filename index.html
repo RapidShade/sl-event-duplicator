@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v9.3.0</title>
+  <title>Duplicate Event Widget v9.4.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,14 +23,14 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v9.3.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v9.4.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
   <div id="selection-state" class="selector-container hidden">
     <h3>Selected Event:</h3>
     <p id="selected-event-name"></p>
-    <button id="start-duplication">Duplicate This Event</button>
+    <button id="start-duplication" data-id="0">Duplicate This Event</button>
   </div>
   <div id="processing-state" class="hidden">
     <div id="loader"></div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v9.3.0 (Uses onRecord for ID, then fetchTable for raw data to fix references)
+   * Version: v9.4.0 (Combines reliable ID storage on DOM with raw data fetching)
    */
-  const WIDGET_VERSION = "v9.3.0";
+  const WIDGET_VERSION = "v9.4.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -78,8 +78,6 @@
   ];
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
-  // NEW: Store only the ID of the last selected record.
-  let lastSelectedRecordId = null;
 
   function setUIState(state, message = '') {
     console.log(`Setting UI state to: ${state}`, message);
@@ -175,13 +173,14 @@
 
   async function duplicateSelectedEvent() {
     try {
-      // CHANGED: Use the stored ID to fetch the full, raw record data.
-      const sourceEventId = lastSelectedRecordId;
+      // FINAL: Read the ID from the button's dataset. This is reliable.
+      const sourceEventId = parseInt(document.getElementById('start-duplication').dataset.id, 10);
       if (!sourceEventId) {
         throw new Error(`No event is selected. Please click on a record in the table first.`);
       }
 
       setUIState('processing', 'Fetching source event data...');
+      // Use the reliable ID to fetch the full, raw record data with a filter.
       const sourceEventRaw = await grist.docApi.fetchTable(config.tables.EVENTS, {id: [sourceEventId]});
       const sourceEvent = normalizeData(sourceEventRaw)[0];
 
@@ -246,13 +245,14 @@
   grist.ready({ requiredAccess: 'full', table: config.tables.EVENTS });
 
   grist.onRecord(record => {
-    // CHANGED: Store only the ID from the selected record.
-    lastSelectedRecordId = record ? record.id : null;
-
+    // FINAL: Store the ID on the button's dataset for reliable access on click.
+    const button = document.getElementById('start-duplication');
     if (record?.id) {
+        button.dataset.id = record.id;
         setUIState('selection', `[${record.id}] ${record.Name}`);
     } else {
-      setUIState('initial');
+        button.dataset.id = 0;
+        setUIState('initial');
     }
   });
 
