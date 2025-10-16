@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.5.0</title>
+  <title>Duplicate Event Widget v10.5.1</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.5.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.5.1</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -48,9 +48,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.5.0 (Fixes invalid reference issue by fetching raw record data)
+   * Version: v10.5.1 (Fixes invalid reference issue by fetching raw record data)
    */
-  const WIDGET_VERSION = "v10.5.0";
+  const WIDGET_VERSION = "v10.5.1";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -74,7 +74,7 @@
       'expense_diff_percent', 'total_budgeted_revenue', 'total_actual_revenue', 'revenue_diff',
       'revenue_diff_percent', 'projected_budget', 'Target1', 'TargetKey1', 'Target2',
       'TargetKey2', 'Target3', 'TargetKey3', 'Variance', 'Viariance',
-      'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID'
+      'ExpCode', 'RevCode', 'Actual', 'Budget', 'Projected', 'ESID', 'Notes'
   ];
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
