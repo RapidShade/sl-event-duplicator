@@ -2,34 +2,87 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.8.2</title>
+  <title>Duplicate Event Widget v10.9.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
-    body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
-    #widget-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+      padding: 0.5rem; 
+      text-align: center; 
+      color: #333; 
+      background-color: #f9f9f9; 
+      font-size: 14px;
+      margin: 0;
+    }
+    #widget-container { 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: flex-start; 
+      height: 100%;
+    }
     .hidden { display: none !important; }
-    #loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
-    .selector-container, #selection-state, #initial-state { padding: 1rem; border: 1px solid #ccc; border-radius: 8px; background-color: white; width: 80%; max-width: 400px; margin-top: 1rem; }
-    select, button { padding: 8px 12px; margin-top: 10px; border-radius: 4px; border: 1px solid #ccc; }
+    #loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
+    .selector-container, #selection-state, #initial-state { 
+      padding: 1rem; 
+      background-color: white; 
+      width: 100%; 
+      box-sizing: border-box; 
+      margin-top: 0.5rem; 
+      border-radius: 8px;
+    }
+     #initial-state {
+      border: 1px solid #ccc;
+    }
+    #selection-state {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 1rem;
+      border: 1px solid #ccc;
+    }
+    #selection-state p {
+      margin: 0 1rem 0 0;
+      text-align: left;
+      flex-grow: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #selection-state button {
+      margin-top: 0;
+      flex-shrink: 0; /* Prevents button from shrinking */
+    }
+    select, button { 
+      padding: 6px 12px; 
+      margin-top: 10px; 
+      border-radius: 4px; 
+      border: 1px solid #ccc; 
+      font-size: 13px;
+    }
     button { background-color: #4CAF50; color: white; cursor: pointer; }
     button:disabled { background-color: #ccc; cursor: not-allowed; }
     .cancel-button { background-color: #f44336; }
     #status { margin-top: 1rem; font-weight: bold; }
     .status-success { color: green; }
     .status-error   { color: red; }
-    h2#widget-title { font-size: 1.2em; margin-bottom: 1rem; }
-    #initial-state p, #selection-state p { margin-top: 0.5rem; word-wrap: break-word; }
+    h2#widget-title { 
+      font-size: 1em; 
+      margin: 0 0 0.5rem 0; 
+      color: #666;
+      font-weight: normal;
+    }
+    #initial-state p, #selection-state p { margin-top: 0; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.8.2</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.9.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
   <div id="selection-state" class="selector-container hidden">
-    <h3>Selected Event:</h3>
     <p id="selected-event-name"></p>
     <button id="start-duplication">Duplicate This Event</button>
   </div>
@@ -37,7 +90,7 @@
     <div id="loader"></div>
     <p id="processing-message">Working...</p>
   </div>
-  <div id="period-selector-container" class="selector-container hidden">
+  <div id="period-selector-container" class="selector-container">
     <label for="period-select">Select Target Period:</label><br>
     <select id="period-select"></select><br>
     <button id="confirm-duplication">Confirm & Duplicate</button>
@@ -49,9 +102,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.8.2 (PASSTHROUGH Permissions check! - Uses bundled actions for a robust, atomic permission check)
+   * Version: v10.9.0 (UI cleanup and disabled permission check)
    */
-  const WIDGET_VERSION = "v10.8.2";
+  const WIDGET_VERSION = "v10.9.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -96,6 +149,7 @@
     } else if (state === 'selection') {
       document.getElementById('selection-state').classList.remove('hidden');
       document.getElementById('selected-event-name').textContent = message;
+      document.getElementById('selected-event-name').title = message; // Add tooltip for long names
       activeProcess.sourceEventName = message;
     } else if (state === 'processing') {
       document.getElementById('processing-state').classList.remove('hidden');
@@ -263,41 +317,30 @@
 
   // START PERMISSION CHECK
   /**
-   * Checks for write permissions by attempting an atomic add-and-remove operation.
-   * This is the most reliable way to check permissions and guarantees no orphaned records.
-   * @returns {Promise<boolean>} True if the user has write access, false otherwise.
+   * Checks for write permissions. Currently disabled to always allow access.
+   * @returns {Promise<boolean>} Always returns true.
    */
   async function checkWritePermissions() {
-//    try {
-//      const tempName = `__PERMISSION_CHECK_${Date.now()}`;
-//      // This special action bundle tells Grist to add a record and then immediately
-//      // remove it. The 'OnErrRemoveRecord' ensures that if any part of the
-//      // transaction fails (e.g., due to permissions), the server will automatically
-//      // roll back the addition, preventing orphaned records.
-//      const actions = [
-//        ['AddRecord', config.tables.EVENTS, null, { Name: tempName }],
-//        ['OnErrRemoveRecord', config.tables.EVENTS]
-//      ];
-//      
-//      console.log("Performing atomic permission check...");
-//      // We use bundleUserActions to send this as a single, atomic transaction.
-//      await grist.docApi.bundleUserActions("permission check", actions);
-//      
-//      // If the above line does not throw an error, the user has permission.
-//      console.log("Permission check successful.");
-//      return true;
-//    } catch (err) {
-//      // If bundleUserActions fails, it's almost certainly a permission error.
-//      console.warn("Permission check failed. User likely does not have write access.", err);
-//      return false;
-//    }
+    // Permission check is currently disabled. Always returning true.
+    return true;
 
-// RapidShade - DISABLED CHECK -MOCKING FOR NOW
+    /*
+    // Original atomic permission check logic:
     try {
+      const tempName = `__PERMISSION_CHECK_${Date.now()}`;
+      const actions = [
+        ['AddRecord', config.tables.EVENTS, null, { Name: tempName }],
+        ['OnErrRemoveRecord', config.tables.EVENTS]
+      ];
+      console.log("Performing atomic permission check...");
+      await grist.docApi.bundleUserActions("permission check", actions);
+      console.log("Permission check successful.");
       return true;
     } catch (err) {
+      console.warn("Permission check failed. User likely does not have write access.", err);
       return false;
     }
+    */
   }
   // END PERMISSION CHECK
 
@@ -322,7 +365,8 @@
           setUIState('initial');
         }
       });
-    } catch (err) {
+    } catch (err)
+ {
       console.error('Failed to initialize widget:', err);
       setUIState('error', `Initialization failed: ${err.message}`);
     }
