@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.9.0</title>
+  <title>Duplicate Event Widget v11.0.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -34,7 +34,7 @@
      #initial-state {
       border: 1px solid #ccc;
     }
-    #selection-state {
+    #selection-state, #period-selector-container {
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -52,6 +52,15 @@
     #selection-state button {
       margin-top: 0;
       flex-shrink: 0; /* Prevents button from shrinking */
+    }
+    #period-selector-container select, #period-selector-container button {
+        margin-top: 0;
+    }
+    #period-selector-container label {
+        margin-right: 0.5rem;
+    }
+    #period-selector-container button + button {
+        margin-left: 0.5rem;
     }
     select, button { 
       padding: 6px 12px; 
@@ -78,7 +87,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.9.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v11.0.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -90,11 +99,15 @@
     <div id="loader"></div>
     <p id="processing-message">Working...</p>
   </div>
-  <div id="period-selector-container" class="selector-container">
-    <label for="period-select">Select Target Period:</label><br>
-    <select id="period-select"></select><br>
-    <button id="confirm-duplication">Confirm & Duplicate</button>
-    <button class="cancel-button" id="cancel-duplication">Cancel</button>
+  <div id="period-selector-container" class="selector-container hidden">
+    <div>
+        <label for="period-select">Select Target Period:</label>
+        <select id="period-select"></select>
+    </div>
+    <div>
+        <button id="confirm-duplication">Confirm & Duplicate</button>
+        <button class="cancel-button" id="cancel-duplication">Cancel</button>
+    </div>
   </div>
   <div id="status"></div>
 </div>
@@ -102,9 +115,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.9.0 (UI cleanup and disabled permission check)
+   * Version: v11.0.0 (Hides period selector initially and refines UI)
    */
-  const WIDGET_VERSION = "v10.9.0";
+  const WIDGET_VERSION = "v11.0.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
