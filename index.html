@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v11.4.0</title>
+  <title>Duplicate Event Widget v11.5.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -87,7 +87,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v11.4.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v11.5.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -115,9 +115,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v11.4.0 (Uses fetchSelectedRecord for main event and removes fallback logic, per Grist dev feedback)
+   * Version: v11.5.0 (Reverted to fetchRecordsFiltered for main event to ensure raw reference IDs are used.)
    */
-  const WIDGET_VERSION = "v11.4.0";
+  const WIDGET_VERSION = "v11.5.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -262,12 +262,13 @@
       const sourceEventId = sourceEventFromOnRecord.id;
       const sourceEventNameForMessage = sourceEventFromOnRecord.Name || 'Unknown';
 
-      setUIState('processing', 'Fetching full source event data via fetchSelectedRecord...');
-      const sourceEventFields = await grist.fetchSelectedRecord(sourceEventId);
+      setUIState('processing', 'Fetching full source event data...');
+      const sourceEventRecords = await fetchRecordsFiltered(config.tables.EVENTS, { id: [sourceEventId] });
       
-      if (!sourceEventFields || !sourceEventFields.id) {
-        throw new Error(`Could not fetch the source event (ID: ${sourceEventId}) using fetchSelectedRecord.`);
+      if (!sourceEventRecords || sourceEventRecords.length === 0) {
+        throw new Error(`Could not fetch the source event (ID: ${sourceEventId}).`);
       }
+      const sourceEventFields = sourceEventRecords[0].fields;
       
       setUIState('processing', 'Loading periods...');
       const periodsRecords = await fetchRecordsFiltered(config.tables.PERIODS, {});
@@ -334,7 +335,7 @@
           setUIState('initial');
         }
       });
-    } catch (err) {
+    } catch (err)
       console.error('Failed to initialize widget:', err);
       setUIState('error', `Initialization failed: ${err.message}`);
     }
