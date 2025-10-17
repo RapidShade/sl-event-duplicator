@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.8.0</title>
+  <title>Duplicate Event Widget v10.8.1</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -24,7 +24,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.8.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.8.1</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -49,9 +49,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.8.0 (Uses bundled actions for a robust, atomic permission check)
+   * Version: v10.8.1 (Uses bundled actions for a robust, atomic permission check)
    */
-  const WIDGET_VERSION = "v10.8.0";
+  const WIDGET_VERSION = "v10.8.1";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -268,29 +268,36 @@
    * @returns {Promise<boolean>} True if the user has write access, false otherwise.
    */
   async function checkWritePermissions() {
+//    try {
+//      const tempName = `__PERMISSION_CHECK_${Date.now()}`;
+//      // This special action bundle tells Grist to add a record and then immediately
+//      // remove it. The 'OnErrRemoveRecord' ensures that if any part of the
+//      // transaction fails (e.g., due to permissions), the server will automatically
+//      // roll back the addition, preventing orphaned records.
+//      const actions = [
+//        ['AddRecord', config.tables.EVENTS, null, { Name: tempName }],
+//        ['OnErrRemoveRecord', config.tables.EVENTS]
+//      ];
+//      
+//      console.log("Performing atomic permission check...");
+//      // We use bundleUserActions to send this as a single, atomic transaction.
+//      await grist.docApi.bundleUserActions("permission check", actions);
+//      
+//      // If the above line does not throw an error, the user has permission.
+//      console.log("Permission check successful.");
+//      return true;
+//    } catch (err) {
+//      // If bundleUserActions fails, it's almost certainly a permission error.
+//      console.warn("Permission check failed. User likely does not have write access.", err);
+//      return false;
+//    }
+
+// RapidShade - DISABLED CHECK -MOCKING FOR NOW
     try {
-      const tempName = `__PERMISSION_CHECK_${Date.now()}`;
-      // This special action bundle tells Grist to add a record and then immediately
-      // remove it. The 'OnErrRemoveRecord' ensures that if any part of the
-      // transaction fails (e.g., due to permissions), the server will automatically
-      // roll back the addition, preventing orphaned records.
-      const actions = [
-        ['AddRecord', config.tables.EVENTS, null, { Name: tempName }],
-        ['OnErrRemoveRecord', config.tables.EVENTS]
-      ];
-      
-      console.log("Performing atomic permission check...");
-      // We use bundleUserActions to send this as a single, atomic transaction.
-      await grist.docApi.bundleUserActions("permission check", actions);
-      
-      // If the above line does not throw an error, the user has permission.
-      console.log("Permission check successful.");
       return true;
-    } catch (err) {
-      // If bundleUserActions fails, it's almost certainly a permission error.
-      console.warn("Permission check failed. User likely does not have write access.", err);
-      return false;
     }
+    
+  
   }
   // END PERMISSION CHECK
 
