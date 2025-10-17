@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v10.8.1</title>
+  <title>Duplicate Event Widget v10.8.2</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { font-family: sans-serif; padding: 1rem; text-align: center; color: #333; background-color: #f9f9f9; }
@@ -24,7 +24,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v10.8.1</h2>
+  <h2 id="widget-title">Duplicate Event Widget v10.8.2</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -49,9 +49,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v10.8.1 (Uses bundled actions for a robust, atomic permission check)
+   * Version: v10.8.2 (PASSTHROUGH Permissions check! - Uses bundled actions for a robust, atomic permission check)
    */
-  const WIDGET_VERSION = "v10.8.1";
+  const WIDGET_VERSION = "v10.8.2";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -295,9 +295,8 @@
 // RapidShade - DISABLED CHECK -MOCKING FOR NOW
     try {
       return true;
-    }
-    
-  
+    } catch (err) {
+      return false;
   }
   // END PERMISSION CHECK
 
