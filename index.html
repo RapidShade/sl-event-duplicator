@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v11.8.0</title>
+  <title>Duplicate Event Widget v11.9.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -87,7 +87,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v11.8.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v11.9.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -115,9 +115,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v11.8.0 (Centralized lookup table config and improved error handling for missing tables.)
+   * Version: v11.9.0 (Updated with correct lookup table and column names.)
    */
-  const WIDGET_VERSION = "v11.8.0";
+  const WIDGET_VERSION = "v11.9.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -127,14 +127,11 @@
       EVENTS: "Events", EXPENSES: "Expenses", EXPENSE_DETAILS: "ExpenseDetails",
       REVENUES: "Revenues", REVENUE_DETAILS: "RevenueDetails", PERIODS: "Periods",
       
-      // --- IMPORTANT ---
-      // Please verify these lookup table names match your document exactly.
-      // The name on the left (e.g., "SPORTS") is an internal key used by the script.
-      // The name on the right (e.g., "Sports") is the ACTUAL table name in your Grist document.
-      SPORTS: "Sports",                           // Correctly identified from logs.
-      EVENT_INSTITUTES: "EventInstitution",        // GUESSED NAME - PLEASE VERIFY!
-      LOCATION_SCOPES: "EventDomains",          // GUESSED NAME - PLEASE VERIFY!
-      EVENT_TYPES: "EventTypes",                  // GUESSED NAME - PLEASE VERIFY!
+      // Configuration based on user feedback
+      SPORTS: "Sports",
+      EVENT_INSTITUTES: "EventInstitution",
+      LOCATION_SCOPES: "EventDomains",
+      EVENT_TYPES: "EventTypes",
     },
     columnIds: {
       EVENT_LINK: "Event",
