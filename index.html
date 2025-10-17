@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v11.6.0</title>
+  <title>Duplicate Event Widget v11.7.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -87,7 +87,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v11.6.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v11.7.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -115,9 +115,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v11.6.0 (Fixed syntax error in initializeWidget try...catch block)
+   * Version: v11.7.0 (Uses a hybrid approach: fetchSelectedRecord for reliability, and caches lookup tables to resolve reference IDs.)
    */
-  const WIDGET_VERSION = "v11.6.0";
+  const WIDGET_VERSION = "v11.7.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -126,12 +126,21 @@
     tables: {
       EVENTS: "Events", EXPENSES: "Expenses", EXPENSE_DETAILS: "ExpenseDetails",
       REVENUES: "Revenues", REVENUE_DETAILS: "RevenueDetails", PERIODS: "Periods",
+      // Lookup tables for reference columns
+      SPORTS: "Sports", EVENT_INSTITUTES: "EventInstitutes", 
+      LOCATION_SCOPES: "LocationScopes", EVENT_TYPES: "EventTypes",
     },
     columnIds: {
       EVENT_LINK: "Event",
       EXPENSE_LINK: "Expense",
       REVENUE_LINK: "Revenue",
-      BUDGET_VERSION_LINK: "BudgetVersion"
+    },
+    // Define reference columns that need their IDs looked up
+    referenceColumns: {
+      Sport: { table: "SPORTS", valueColumn: 'Name' },
+      EventInstitute: { table: "EVENT_INSTITUTES", valueColumn: 'Name' },
+      LocationScope: { table: "LOCATION_SCOPES", valueColumn: 'Name' },
+      EventType: { table: "EVENT_TYPES", valueColumn: 'Name' },
     }
   };
 
@@ -147,8 +156,10 @@
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
   let lastSelectedRecord = null;
   let tokenInfo = null;
+  let lookupCaches = {};
 
   function setUIState(state, message = '') {
+    // ... (UI state logic remains the same)
     console.log(`Setting UI state to: ${state}`, message);
     ['initial-state', 'selection-state', 'processing-state', 'period-selector-container'].forEach(id => {
         document.getElementById(id).classList.add('hidden');
@@ -175,6 +186,7 @@
   }
   
   function cleanRecordData(recordFields) {
+      // ... (cleaning logic remains the same)
       const cleanedData = { ...recordFields };
       delete cleanedData.id;
       Object.keys(cleanedData).forEach(key => {
@@ -186,6 +198,7 @@
   }
   
   async function fetchRecordsFiltered(tableId, filter = {}) {
+    // ... (API fetch logic remains the same)
     if (!tokenInfo) { throw new Error("API not initialized."); }
     const filterString = encodeURIComponent(JSON.stringify(filter));
     if (!document.referrer) { throw new Error("Cannot determine Grist API origin."); }
@@ -205,8 +218,50 @@
     const data = await response.json();
     return data.records;
   }
+  
+  // NEW: Function to cache lookup tables on startup
+  async function cacheLookupTables() {
+    console.log("Caching lookup tables...");
+    for (const col of Object.values(config.referenceColumns)) {
+        const tableName = config.tables[col.table];
+        if (!tableName) continue;
+        
+        try {
+            const records = await fetchRecordsFiltered(tableName, {});
+            const map = new Map();
+            for (const rec of records) {
+                // Map the text value (e.g., "ΚΟΛΥΜΒΗΣΗ") to the record ID
+                map.set(rec.fields[col.valueColumn], rec.id);
+            }
+            lookupCaches[col.table] = map;
+            console.log(`Cached ${map.size} entries for ${tableName}`);
+        } catch (err) {
+            console.error(`Failed to cache lookup table ${tableName}`, err);
+            // Don't block the whole widget, but log the error
+            setUIState('error', `Could not load reference table: ${tableName}`);
+        }
+    }
+  }
+
+  // NEW: Function to resolve reference fields from text to ID using caches
+  function resolveReferenceFields(record) {
+    const resolvedRecord = { ...record };
+    for (const [colName, colConfig] of Object.entries(config.referenceColumns)) {
+        const textValue = record[colName];
+        if (typeof textValue !== 'string' || !textValue) continue;
+
+        const cache = lookupCaches[colConfig.table];
+        if (cache && cache.has(textValue)) {
+            resolvedRecord[colName] = cache.get(textValue);
+        } else {
+            console.warn(`Could not find ID for reference '${textValue}' in column '${colName}'. It may be copied as text.`);
+        }
+    }
+    return resolvedRecord;
+  }
 
   async function cloneRelatedRecords(options) {
+      // ... (cloning logic remains the same)
       const { parentTable, childTable, sourceParentId, newParentId, parentLinkColumnId, childLinkColumnId } = options;
       const childrenFilter = { [parentLinkColumnId]: [sourceParentId] };
       const childrenToClone = await fetchRecordsFiltered(parentTable, childrenFilter);
@@ -262,14 +317,17 @@
       const sourceEventId = sourceEventFromOnRecord.id;
       const sourceEventNameForMessage = sourceEventFromOnRecord.Name || 'Unknown';
 
-      setUIState('processing', 'Fetching full source event data...');
-      const sourceEventRecords = await fetchRecordsFiltered(config.tables.EVENTS, { id: [sourceEventId] });
-      
-      if (!sourceEventRecords || sourceEventRecords.length === 0) {
+      // STEP 1: Fetch the record reliably using the Grist API function
+      setUIState('processing', 'Fetching event data...');
+      let sourceEventFields = await grist.fetchSelectedRecord(sourceEventId);
+      if (!sourceEventFields || !sourceEventFields.id) {
         throw new Error(`Could not fetch the source event (ID: ${sourceEventId}).`);
       }
-      const sourceEventFields = sourceEventRecords[0].fields;
       
+      // STEP 2: Resolve the text-based reference fields into correct numeric IDs
+      setUIState('processing', 'Resolving reference fields...');
+      sourceEventFields = resolveReferenceFields(sourceEventFields);
+
       setUIState('processing', 'Loading periods...');
       const periodsRecords = await fetchRecordsFiltered(config.tables.PERIODS, {});
       const periods = periodsRecords.map(p => ({id: p.id, text: p.fields.Name}));
@@ -326,6 +384,9 @@
       console.log('Initializing widget and fetching API token...');
       tokenInfo = await grist.docApi.getAccessToken({ readOnly: false });
       
+      // NEW: Pre-fetch and cache lookup tables for performance
+      await cacheLookupTables();
+
       console.log('Widget is ready.');
       grist.onRecord(record => {
         lastSelectedRecord = record;
