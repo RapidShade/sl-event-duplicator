@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v11.5.0</title>
+  <title>Duplicate Event Widget v11.6.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -87,7 +87,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v11.5.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v11.6.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -115,9 +115,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v11.5.0 (Reverted to fetchRecordsFiltered for main event to ensure raw reference IDs are used.)
+   * Version: v11.6.0 (Fixed syntax error in initializeWidget try...catch block)
    */
-  const WIDGET_VERSION = "v11.5.0";
+  const WIDGET_VERSION = "v11.6.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -335,7 +335,7 @@
           setUIState('initial');
         }
       });
-    } catch (err)
+    } catch (err) {
       console.error('Failed to initialize widget:', err);
       setUIState('error', `Initialization failed: ${err.message}`);
     }
