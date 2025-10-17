@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v11.2.0</title>
+  <title>Duplicate Event Widget v11.4.0</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -87,7 +87,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v11.2.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget v11.4.0</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -115,9 +115,9 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v11.2.0 (Reinstated direct API calls with URL param auth for performance and editor compatibility)
+   * Version: v11.4.0 (Uses fetchSelectedRecord for main event and removes fallback logic, per Grist dev feedback)
    */
-  const WIDGET_VERSION = "v11.2.0";
+  const WIDGET_VERSION = "v11.4.0";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -146,7 +146,7 @@
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
   let lastSelectedRecord = null;
-  let tokenInfo = null; // To store API access token info.
+  let tokenInfo = null;
 
   function setUIState(state, message = '') {
     console.log(`Setting UI state to: ${state}`, message);
@@ -155,14 +155,12 @@
     });
     document.getElementById('status').textContent = '';
 
-    const startButton = document.getElementById('start-duplication');
-
     if (state === 'initial') { 
       document.getElementById('initial-state').classList.remove('hidden'); 
     } else if (state === 'selection') {
       document.getElementById('selection-state').classList.remove('hidden');
       document.getElementById('selected-event-name').textContent = message;
-      document.getElementById('selected-event-name').title = message; // Add tooltip for long names
+      document.getElementById('selected-event-name').title = message;
       activeProcess.sourceEventName = message;
     } else if (state === 'processing') {
       document.getElementById('processing-state').classList.remove('hidden');
@@ -173,13 +171,9 @@
       document.getElementById('status').textContent = message;
       document.getElementById('status').className = `status-${state}`;
       document.getElementById('selection-state').classList.remove('hidden');
-    } else if (state === 'permission-denied') {
-        document.getElementById('initial-state').classList.remove('hidden');
-        document.querySelector('#initial-state p').textContent = message;
-        startButton.disabled = true;
     }
   }
-
+  
   function cleanRecordData(recordFields) {
       const cleanedData = { ...recordFields };
       delete cleanedData.id;
@@ -192,11 +186,10 @@
   }
   
   async function fetchRecordsFiltered(tableId, filter = {}) {
-    if (!tokenInfo) { throw new Error("API not initialized. Cannot fetch records."); }
+    if (!tokenInfo) { throw new Error("API not initialized."); }
     const filterString = encodeURIComponent(JSON.stringify(filter));
-    if (!document.referrer) {
-      throw new Error("Cannot determine Grist API origin. document.referrer is not available.");
-    }
+    if (!document.referrer) { throw new Error("Cannot determine Grist API origin."); }
+    
     const gristOrigin = new URL(document.referrer).origin;
     const apiPath = new URL(tokenInfo.baseUrl).pathname;
     const url = `${gristOrigin}${apiPath}/tables/${tableId}/records?filter=${filterString}&auth=${tokenInfo.token}`;
@@ -259,9 +252,8 @@
 
   async function duplicateSelectedEvent() {
     try {
-      if (!tokenInfo) {
-        throw new Error("Widget is not ready.");
-      }
+      if (!tokenInfo) { throw new Error("Widget is not ready."); }
+      
       setUIState('processing', 'Preparing source event...');
       const sourceEventFromOnRecord = lastSelectedRecord;
       if (!sourceEventFromOnRecord || !sourceEventFromOnRecord.id) {
@@ -270,13 +262,13 @@
       const sourceEventId = sourceEventFromOnRecord.id;
       const sourceEventNameForMessage = sourceEventFromOnRecord.Name || 'Unknown';
 
-      setUIState('processing', 'Fetching full source event data...');
-      const sourceEventRecords = await fetchRecordsFiltered(config.tables.EVENTS, { id: [sourceEventId] });
-      if (!sourceEventRecords || sourceEventRecords.length === 0) {
-        throw new Error(`Could not fetch the source event (ID: ${sourceEventId}).`);
+      setUIState('processing', 'Fetching full source event data via fetchSelectedRecord...');
+      const sourceEventFields = await grist.fetchSelectedRecord(sourceEventId);
+      
+      if (!sourceEventFields || !sourceEventFields.id) {
+        throw new Error(`Could not fetch the source event (ID: ${sourceEventId}) using fetchSelectedRecord.`);
       }
-      const sourceEventFields = sourceEventRecords[0].fields;
-
+      
       setUIState('processing', 'Loading periods...');
       const periodsRecords = await fetchRecordsFiltered(config.tables.PERIODS, {});
       const periods = periodsRecords.map(p => ({id: p.id, text: p.fields.Name}));
@@ -328,28 +320,11 @@
     }
   }
 
-  // START PERMISSION CHECK
-  /**
-   * Checks for write permissions. Currently disabled to always allow access.
-   * @returns {Promise<boolean>} Always returns true.
-   */
-  async function checkWritePermissions() {
-    // Permission check is currently disabled. Always returning true.
-    return true;
-  }
-  // END PERMISSION CHECK
-
   async function initializeWidget() {
     try {
       console.log('Initializing widget and fetching API token...');
       tokenInfo = await grist.docApi.getAccessToken({ readOnly: false });
       
-      const hasPermission = await checkWritePermissions();
-      if (!hasPermission) {
-        setUIState('permission-denied', 'You do not have permission to duplicate events.');
-        return; // Stop initialization
-      }
-
       console.log('Widget is ready.');
       grist.onRecord(record => {
         lastSelectedRecord = record;
@@ -370,7 +345,6 @@
 
   document.getElementById('start-duplication').addEventListener('click', duplicateSelectedEvent);
 
-  // --- Helper Functions ---
   async function addRecords(tableName, records) {
     if (!records?.length) return [];
     const actions = records.map(record => ['AddRecord', tableName, null, record]);
@@ -381,7 +355,7 @@
     if (!sourceDate || !targetPeriodYear) return sourceDate;
     try {
       const date = new Date(typeof sourceDate === 'number' ? sourceDate * 1000 : sourceDate);
-      if (isNaN(date.getTime())) return sourceDate;
+      if (isNaN(date.getTime())) return date;
       date.setFullYear(targetPeriodYear);
       return date.getTime() / 1000;
     } catch (e) { return sourceDate; }
