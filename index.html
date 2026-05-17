@@ -115,10 +115,12 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v12.0.0 — fix exclude-list typos, remap Event on cloned
-   * children, and resolve string refs on child rows.
+   * Version: v12.0.1 — restore child-table formula columns that were
+   * dropped from the exclude list in v12.0.0 (Actual/Budget/Variance on
+   * Expenses+Revenues, ESID on the *Details tables, and ExpCode/RevCode
+   * trigger columns that should regenerate from $id).
    */
-  const WIDGET_VERSION = "v12.0.0";
+  const WIDGET_VERSION = "v12.0.1";
   console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
@@ -153,20 +155,26 @@
   };
 
   // Column names that must be stripped from any row before AddRecord.
-  // Each entry must EXACTLY match a real column name in the canonical schema
-  // (HSF-KOE BUDGET SYSTEM). Verified against vm-context/schema/.
+  // Verified against the live schema (HSF-KOE BUDGET SYSTEM). Pure formula
+  // columns will throw ValueError "Can't save value to formula column X" if
+  // written. Trigger columns (isFormula=0 with a formula) are technically
+  // writable but should be regenerated from $id, so they're excluded too.
   const FORMULA_AND_SYSTEM_COLUMNS_TO_EXCLUDE = [
-      // Audit / system fields on every table
+      // Audit / system fields on every table (trigger formulas)
       'CreatedAt', 'UpdatedAt', 'CreatedBy', 'UpdatedBy',
       // Events identity / display
       'EventCode', 'DisplayStyle',
-      // Events formula columns (Total = sum of children)
+      // Events formula columns
       'total_budget_expense', 'total_actual_expense', 'expense_diff', 'expense_diff_percent',
       'total_budget_revenue', 'total_actual_revenue', 'revenue_diff', 'revenue_diff_percent',
       'projected_budget',
-      // Events target columns (locked formulas)
       'Target1', 'TargetKey1', 'Target2', 'TargetKey2', 'Target3', 'TargetKey3',
       'Total_Budget_Balance', 'Total_Actual_Balance', 'Total_Diff_Balance',
+      // Expenses / Revenues formula columns (sums over children) + the
+      // ExpCode/RevCode trigger columns that derive from $id
+      'Actual', 'Budget', 'Variance', 'ExpCode', 'RevCode',
+      // ExpenseDetails / RevenueDetails formula columns
+      'ESID',
   ];
 
   let activeProcess = { resolvePeriod: null, sourceEventName: '' };
