@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Duplicate Event Widget v11.9.0</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Duplicate Event Widget v12.0.2</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
     body { 
@@ -87,7 +90,7 @@
 </head>
 <body>
 <div id="widget-container">
-  <h2 id="widget-title">Duplicate Event Widget v11.9.0</h2>
+  <h2 id="widget-title">Duplicate Event Widget</h2>
   <div id="initial-state" class="selector-container">
     <p>Select an event in the table to begin.</p>
   </div>
@@ -115,13 +118,26 @@
 <script>
   /**
    * RapidShade Duplicate Event Widget
-   * Version: v12.0.1 — restore child-table formula columns that were
-   * dropped from the exclude list in v12.0.0 (Actual/Budget/Variance on
-   * Expenses+Revenues, ESID on the *Details tables, and ExpCode/RevCode
-   * trigger columns that should regenerate from $id).
+   * Version: v12.0.2 — loud, prefixed console logging; no-cache meta
+   * headers so browsers stop pinning stale builds in the iframe cache.
    */
-  const WIDGET_VERSION = "v12.0.1";
-  console.log(`RapidShade: Widget version ${WIDGET_VERSION}`);
+  const WIDGET_VERSION = "v12.0.2";
+  const VLOG_PREFIX = `[Duplicator ${WIDGET_VERSION}]`;
+
+  // Wrap console.{log,warn,error} so every emitted line carries the version.
+  // Makes it impossible to mis-attribute logs to the wrong widget build.
+  const vlog  = (...a) => console.log(VLOG_PREFIX, ...a);
+  const vwarn = (...a) => console.warn(VLOG_PREFIX, ...a);
+  const verr  = (...a) => console.error(VLOG_PREFIX, ...a);
+
+  // Loud, hard-to-miss load banner in devtools. Uses raw console.log
+  // directly so the %c styling renders without an extra prefix.
+  console.log(
+    `%c${VLOG_PREFIX}%c loaded — ${new Date().toLocaleTimeString()}`,
+    'background:#0066cc;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px;',
+    'color:#0066cc;font-weight:bold;'
+  );
+
   document.getElementById('widget-title').textContent = `Duplicate Event Widget ${WIDGET_VERSION}`;
   document.title = `Duplicate Event Widget ${WIDGET_VERSION}`;
 
@@ -183,7 +199,7 @@
   let lookupCaches = {};
 
   function setUIState(state, message = '') {
-    console.log(`Setting UI state to: ${state}`, message);
+    vlog(`Setting UI state to: ${state}`, message);
     ['initial-state', 'selection-state', 'processing-state', 'period-selector-container'].forEach(id => {
         document.getElementById(id).classList.add('hidden');
     });
@@ -228,12 +244,12 @@
     const apiPath = new URL(tokenInfo.baseUrl).pathname;
     const url = `${gristOrigin}${apiPath}/tables/${tableId}/records?filter=${filterString}&auth=${tokenInfo.token}`;
 
-    console.log(`Fetching from API: ${url}`);
+    vlog(`Fetching from API: ${url}`);
     const response = await fetch(url);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`API Error Response for ${tableId}:`, errorText);
+      verr(`API Error Response for ${tableId}:`, errorText);
       throw new Error(`API Error (${response.status}) while fetching '${tableId}'.`);
     }
     const data = await response.json();
@@ -241,7 +257,7 @@
   }
   
   async function cacheLookupTables() {
-    console.log("Caching lookup tables...");
+    vlog("Caching lookup tables...");
     for (const colConfig of Object.values(config.referenceColumns)) {
         const tableName = config.tables[colConfig.tableKey];
         if (!tableName) continue;
@@ -253,9 +269,9 @@
                 map.set(rec.fields[colConfig.valueColumn], rec.id);
             }
             lookupCaches[colConfig.tableKey] = map;
-            console.log(`Cached ${map.size} entries for ${tableName}`);
+            vlog(`Cached ${map.size} entries for ${tableName}`);
         } catch (err) {
-            console.warn(`Could not cache lookup table "${tableName}". Reference fields pointing to it may not duplicate correctly. Error: ${err.message}`);
+            vwarn(`Could not cache lookup table "${tableName}". Reference fields pointing to it may not duplicate correctly. Error: ${err.message}`);
         }
     }
   }
@@ -274,7 +290,7 @@
             // Either the lookup table wasn't cached, or the value isn't a known
             // entry. Leave the column null so Grist doesn't reject the row;
             // the user can fix the bad source data afterwards.
-            console.warn(`Could not resolve Ref '${textValue}' in column '${colName}'. Leaving null.`);
+            vwarn(`Could not resolve Ref '${textValue}' in column '${colName}'. Leaving null.`);
             resolvedRecord[colName] = null;
         }
     }
@@ -288,7 +304,7 @@
       const childrenToClone = await fetchRecordsFiltered(parentTable, childrenFilter);
 
       if (childrenToClone.length === 0) {
-        console.log(`No records found in ${parentTable} for parent ID ${sourceParentId}.`);
+        vlog(`No records found in ${parentTable} for parent ID ${sourceParentId}.`);
         return;
       }
       setUIState('processing', `Cloning ${childrenToClone.length} ${parentTable} records...`);
@@ -302,7 +318,7 @@
 
       const newChildIds = await addRecords(parentTable, newChildrenData);
       if (newChildIds.length === 0) {
-        console.warn(`Failed to create new records in ${parentTable}. Aborting grandchild clone.`);
+        vwarn(`Failed to create new records in ${parentTable}. Aborting grandchild clone.`);
         return;
       }
 
@@ -401,19 +417,19 @@
 
       setUIState('success', `Event '${sourceEventNameForMessage}' duplicated successfully!`);
     } catch (err) {
-      console.error('RapidShade duplication error', err);
+      verr('RapidShade duplication error', err);
       setUIState('error', `Error: ${err.message || err}`);
     }
   }
 
   async function initializeWidget() {
     try {
-      console.log('Initializing widget and fetching API token...');
+      vlog('Initializing widget and fetching API token...');
       tokenInfo = await grist.docApi.getAccessToken({ readOnly: false });
       
       await cacheLookupTables();
 
-      console.log('Widget is ready.');
+      vlog('Widget is ready.');
       grist.onRecord(record => {
         lastSelectedRecord = record;
         if (record?.id) {
@@ -423,7 +439,7 @@
         }
       });
     } catch (err) {
-      console.error('Failed to initialize widget:', err);
+      verr('Failed to initialize widget:', err);
       setUIState('error', `Initialization failed: ${err.message}`);
     }
   }
